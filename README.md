@@ -13,7 +13,6 @@ Built for the workflow of maintaining self-built packages on Void Linux — trac
 - One-key template bump + build
 - Dependency-aware build ordering
 - SONAME mismatch detection and `common/shlibs` auto-update
-- GCC version gate tracking
 - Build log viewer with scrolling
 - Git integration (ahead/behind count, commit workflow)
 - Uncommitted template detection

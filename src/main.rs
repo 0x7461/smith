@@ -3,7 +3,6 @@ mod build;
 mod cli;
 mod config;
 mod dep_graph;
-mod gcc;
 mod git;
 mod package;
 mod repo;

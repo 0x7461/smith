@@ -7,7 +7,6 @@ use ratatui::widgets::TableState;
 
 use crate::build::{self, BuildHistory, BuildJob, BuildJobStatus, BuildMsg, BuildQueue};
 use crate::dep_graph::DepGraph;
-use crate::gcc::GccInfo;
 use crate::git::{self, GitMsg, GitOp, GitStatus};
 use crate::package::{Package, PackageState, Status};
 use crate::repo;
@@ -62,7 +61,6 @@ pub struct App {
     pub filter: String,
     pub filter_active: bool,
     pub shlib_map: ShlibMap,
-    pub gcc_info: GccInfo,
     pub shlib_updates: Vec<(String, String, String, String)>, // (pkg, old_so, new_so, new_pkgver)
     pub build_log_scroll: usize, // lines offset from bottom; 0 = follow tail
     pub pkg_last_checked: Option<u64>, // unix timestamp of last pkg upstream check
@@ -103,7 +101,6 @@ impl App {
 
         let git_status = git::get_git_status(&void_pkgs);
         let shlib_map = shlibs::parse_shlibs(&void_pkgs);
-        let gcc_info = GccInfo::detect();
 
         // Populate shlibs and check mismatches
         for state in &mut states {
@@ -141,7 +138,6 @@ impl App {
             filter: String::new(),
             filter_active: false,
             shlib_map,
-            gcc_info,
             shlib_updates: Vec::new(),
             build_log_scroll: 0,
             pkg_last_checked: version_check::last_check_time(),
@@ -666,15 +662,6 @@ impl App {
             }
         }
 
-        if self.gcc_info.is_blocked(&name) {
-            let req = self.gcc_info.required_version(&name).unwrap_or_default();
-            self.status_msg = Some(format!(
-                "Cannot build {}: requires GCC {}+, system has {}",
-                name, req, self.gcc_info.version_string()
-            ));
-            return;
-        }
-
         self.build_queue.jobs = vec![BuildJob {
             name,
             status: BuildJobStatus::Pending,
@@ -693,36 +680,18 @@ impl App {
             .packages
             .iter()
             .filter(|p| matches!(p.status, Status::BuildOutdated | Status::BuildFailed))
-            .filter(|p| !self.gcc_info.is_blocked(&p.package.name))
             .map(|p| p.package.name.clone())
             .collect();
 
-        let blocked_count = self
-            .packages
-            .iter()
-            .filter(|p| matches!(p.status, Status::BuildOutdated | Status::BuildFailed))
-            .filter(|p| self.gcc_info.is_blocked(&p.package.name))
-            .count();
-
         if buildable.is_empty() {
-            let hint = if blocked_count > 0 {
-                format!("No buildable packages ({} GCC-blocked)", blocked_count)
-            } else {
-                "No packages to build (try 't' to bump templates)".to_string()
-            };
-            self.status_msg = Some(hint);
+            self.status_msg = Some("No packages to build (try 't' to bump templates)".to_string());
             return;
         }
 
         let topo = self.dep_graph.topological_sort();
         let ordered: Vec<String> = topo.into_iter().filter(|n| buildable.contains(n)).collect();
 
-        let msg = if blocked_count > 0 {
-            format!("Building {} packages ({} GCC-blocked, skipped)...", ordered.len(), blocked_count)
-        } else {
-            format!("Building {} packages...", ordered.len())
-        };
-        self.status_msg = Some(msg);
+        self.status_msg = Some(format!("Building {} packages...", ordered.len()));
 
         self.build_queue.jobs = ordered
             .into_iter()

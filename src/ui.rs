@@ -88,7 +88,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
     draw_header(f, app, chunks[0], visible_len);
     match app.view {
-        View::List => draw_package_list(f, &mut app.table_state, app.selected, &app.packages, &visible_indices, &app.gcc_info, chunks[1]),
+        View::List => draw_package_list(f, &mut app.table_state, app.selected, &app.packages, &visible_indices, chunks[1]),
         View::Tree => draw_tree_view(f, app, chunks[1]),
     }
 
@@ -242,13 +242,6 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect, visible_len: usize) {
         spans.push(Span::styled(pkg_str, Style::default().fg(color)));
     }
 
-    // GCC version
-    spans.push(Span::styled("  ", Style::default()));
-    spans.push(Span::styled(
-        format!("GCC {}", app.gcc_info.version_string()),
-        Style::default().fg(OVERLAY0),
-    ));
-
     // Filter indicator
     if app.filter_active {
         spans.push(Span::styled("  / ", Style::default().fg(TEAL).add_modifier(Modifier::BOLD)));
@@ -277,7 +270,6 @@ fn draw_package_list(
     selected: usize,
     packages: &[crate::package::PackageState],
     visible_indices: &[usize],
-    gcc_info: &crate::gcc::GccInfo,
     area: Rect,
 ) {
     let header_cells = ["Package", "Template", "Installed", "Latest", "Status"]
@@ -317,10 +309,6 @@ fn draw_package_list(
             if !ps.soname_mismatches.is_empty() {
                 status_label.push_str(" !so");
             }
-            if gcc_info.is_blocked(&ps.package.name) {
-                let req = gcc_info.required_version(&ps.package.name).unwrap_or_default();
-                status_label.push_str(&format!(" GCC {}+", req));
-            }
             // Upstream update available — orthogonal to the lifecycle status above.
             if !ps.uncommitted && ps.upstream_newer() {
                 status_label.push_str(" ↑");
@@ -328,7 +316,7 @@ fn draw_package_list(
 
             let status_fg = if ps.uncommitted {
                 OVERLAY0
-            } else if !ps.soname_mismatches.is_empty() || gcc_info.is_blocked(&ps.package.name) {
+            } else if !ps.soname_mismatches.is_empty() {
                 if ps.status == Status::UpToDate { PEACH } else { status_color(&ps.status) }
             } else {
                 status_color(&ps.status)
@@ -585,22 +573,6 @@ fn draw_detail(f: &mut Frame, app: &App, area: Rect) {
         lines.push(Line::from(vec![
             Span::styled("  Build log: ", Style::default().fg(OVERLAY0)),
             Span::styled(log_path.clone(), Style::default().fg(log_color)),
-        ]));
-    }
-
-    // GCC requirement line
-    if app.gcc_info.is_blocked(&pkg.name) {
-        let req = app.gcc_info.required_version(&pkg.name).unwrap_or_default();
-        lines.push(Line::from(vec![
-            Span::styled("  GCC: ", Style::default().fg(OVERLAY0)),
-            Span::styled(
-                format!(
-                    "Requires {}+, system has {}",
-                    req,
-                    app.gcc_info.version_string()
-                ),
-                Style::default().fg(RED),
-            ),
         ]));
     }
 

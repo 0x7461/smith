@@ -1,8 +1,8 @@
 # AGENTS.md — vxpm
 
-Updated: 2026-06-27
+Updated: 2026-07-05
 
-Rust/ratatui TUI for managing the ~24 custom packages in `~/void-packages` (18 Hyprland-ecosystem + 6 others). Tracks versions, checks upstream, computes dependency-aware build order, rebuilds dependents, and drives the git workflow — replaces manual checking when bumping `hyprutils` requires rebuilding 15+ packages. Published as `0x7461/vxpm` on GitHub; xbps-src template at `~/void-packages/srcpkgs/vxpm/template`.
+Rust/ratatui TUI for managing the ~17 custom packages in `~/void-packages` (hyprlock stack — hyprlock/hyprgraphics/hyprlang/hyprutils/hyprwayland-scanner/libspng — plus standalone tools like ghostty, zed, ollama, zen-browser, zig). Tracks versions, checks upstream, computes dependency-aware build order, rebuilds dependents, and drives the git workflow — replaces manual checking when bumping `hyprutils` requires rebuilding its dependents. (The Hyprland compositor ecosystem itself was retired 2026-05-23; its 17 dead templates were deleted 2026-07-05.) Published as `0x7461/vxpm` on GitHub; xbps-src template at `~/void-packages/srcpkgs/vxpm/template`.
 
 Audience: agents editing this repo. Public-facing feature list + keybinds in `README.md`. Decisions, internals, history in `PLAN.md` (local-only — gitignored).
 
@@ -35,7 +35,7 @@ cargo clippy --all-targets
 # `cargo build` to refresh Cargo.lock. Then: git tag v<x.y.z>, push tag → GH Actions builds.
 ```
 
-Config bootstrap: `~/.config/vxpm/config.toml` is auto-created on first run. GCC gate requirements: `~/.config/vxpm/gcc_requirements.toml`.
+Config bootstrap: `~/.config/vxpm/config.toml` is auto-created on first run.
 
 ## Project layout
 
@@ -52,13 +52,12 @@ src/
 ├── build.rs           build queue, streaming logs, auto-rebuild
 ├── git.rs             sync master / rebase custom / push (streaming)
 ├── shlibs.rs          SONAME tracking + auto-update of common/shlibs
-├── gcc.rs             GCC version gate
 └── config.rs          TOML config with ~ expansion
 ```
 
 External integration points:
 - `~/void-packages/` — discovery, build, git ops all target this repo (configurable in `config.toml`).
-- `~/.config/vxpm/{config.toml,gcc_requirements.toml}` — user config.
+- `~/.config/vxpm/config.toml` — user config.
 - `~/.cache/vxpm/build_history.json` — persisted build history.
 - `~/.cache/vxpm/logs/<pkg>-<ts>.log` and `<pkg>-bump-<ts>.log` — build/bump logs.
 - `~/void-packages/hostdir/sources/<filename>` — download cache (avoids double-download with xbps-src).
@@ -75,7 +74,7 @@ External integration points:
 
 The pipeline tracks **only the local build→install lifecycle**. "Upstream has a newer release" is an *orthogonal* axis (`PackageState::upstream_newer()`), not a pipeline state — a package can be e.g. NEEDS BUILD *and* have an upstream update. It surfaces as the `↑` badge + the `latest` column, and gates only the bump key (`t` / `bump --all`), never the build. (Previously it was wedged in as a top-priority status that masked the real build state and blocked builds — fixed 2026-06-01.)
 
-Badges: `↑` = upstream update available; `!so` = SONAME mismatch; `GCC N+` = version-gated.
+Badges: `↑` = upstream update available; `!so` = SONAME mismatch. (The `GCC N+` gate badge was removed 2026-07-05 with the gate — see PLAN.md Decisions.)
 
 ## Boundaries & gotchas
 
@@ -148,5 +147,4 @@ git push origin v<x.y.z>
 
 - **`README.md`** — public feature list, full keybind reference, install instructions.
 - **`PLAN.md`** (local-only, gitignored) — `## Decisions`, `## Internals`, `## Operations / Publishing`, `## History`.
-- **`~/void-packages/HYPRLAND.md`** — current Hyprland ecosystem state, blockers, SONAME tracking.
 - **`~/obsidian-vault/system/void-packages.md`** — git workflow + maintenance commands.
