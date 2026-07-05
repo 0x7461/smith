@@ -12,7 +12,7 @@ Built for the workflow of maintaining self-built packages on Void Linux — trac
 - Upstream version checking against GitHub releases/tags
 - One-key template bump + build
 - Dependency-aware build ordering
-- SONAME mismatch detection and `common/shlibs` auto-update
+- SONAME mismatch detection and `common/shlibs` auto-update — checks the freshly built `.xbps` (not just the installed package), and a pkglint `SONAME bump detected` build failure stages its own one-key fix
 - Build log viewer with scrolling
 - Git integration (ahead/behind count, commit workflow)
 - Uncommitted template detection
@@ -30,7 +30,7 @@ Built for the workflow of maintaining self-built packages on Void Linux — trac
 | `b` | Build selected |
 | `B` | Build all outdated |
 | `g` | Git status |
-| `s` | Apply SONAME shlib updates |
+| `S` | Apply SONAME shlib updates |
 | `Enter` | Detail panel |
 | `?` | Help |
 | `q` | Quit |

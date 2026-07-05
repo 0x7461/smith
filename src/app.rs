@@ -107,7 +107,7 @@ impl App {
             if let Some(entries) = shlib_map.get(&state.package.name) {
                 state.shlibs = entries.clone();
                 state.soname_mismatches =
-                    shlibs::check_soname_mismatches(entries, &state.package.name);
+                    shlibs::check_soname_mismatches(&void_pkgs, entries, &state.package.name);
             }
         }
 
@@ -268,8 +268,11 @@ impl App {
             for state in &mut states {
                 if let Some(entries) = self.shlib_map.get(&state.package.name) {
                     state.shlibs = entries.clone();
-                    state.soname_mismatches =
-                        shlibs::check_soname_mismatches(entries, &state.package.name);
+                    state.soname_mismatches = shlibs::check_soname_mismatches(
+                        &self.void_pkgs,
+                        entries,
+                        &state.package.name,
+                    );
                 }
             }
 
@@ -568,7 +571,15 @@ impl App {
                     for state in &mut self.packages {
                         if state.package.name == name {
                             state.build_log = Some(log_str.clone());
-                            // Check for pending shlib updates
+                            // Re-check against the just-built .xbps (startup mismatch
+                            // data reflects the previously installed package)
+                            if let Some(entries) = self.shlib_map.get(&name) {
+                                state.soname_mismatches = shlibs::check_soname_mismatches(
+                                    &self.void_pkgs,
+                                    entries,
+                                    &name,
+                                );
+                            }
                             for mm in &state.soname_mismatches {
                                 let pkg_ver = format!(
                                     "{}-{}_{}",
@@ -602,6 +613,19 @@ impl App {
                     // Append error lines to output
                     for line in &error_lines {
                         self.build_queue.current_output.push(format!("ERR: {}", line));
+                    }
+                    // pkglint SONAME-bump failure carries its own fix — stage it
+                    let bumps =
+                        shlibs::parse_soname_bump_errors(&self.build_queue.current_output);
+                    if !bumps.is_empty() {
+                        self.shlib_updates.retain(|(pkg, _, _, _)| pkg != &name);
+                        for (old, new, pkgver) in bumps {
+                            self.shlib_updates.push((name.clone(), old, new, pkgver));
+                        }
+                        self.status_msg = Some(format!(
+                            "{}: SONAME bump failed pkglint — S updates common/shlibs, then rebuild",
+                            name
+                        ));
                     }
                     self.build_history.record(&name, false);
                 }
@@ -780,9 +804,28 @@ impl App {
         match shlibs::update_shlibs_file(&self.void_pkgs, &updates) {
             Ok(()) => {
                 let count = self.shlib_updates.len();
+                let touched: Vec<String> =
+                    self.shlib_updates.iter().map(|(p, _, _, _)| p.clone()).collect();
                 self.shlib_updates.clear();
                 self.refresh();
-                self.status_msg = Some(format!("Updated {} shlib entries", count));
+                // Point at the rebuild when the update came from a failed build
+                let needs_rebuild: Vec<&str> = self
+                    .packages
+                    .iter()
+                    .filter(|s| {
+                        s.status == Status::BuildFailed && touched.contains(&s.package.name)
+                    })
+                    .map(|s| s.package.name.as_str())
+                    .collect();
+                self.status_msg = Some(if needs_rebuild.is_empty() {
+                    format!("Updated {} shlib entries", count)
+                } else {
+                    format!(
+                        "Updated {} shlib entries — rebuild with b: {}",
+                        count,
+                        needs_rebuild.join(", ")
+                    )
+                });
             }
             Err(e) => {
                 self.status_msg = Some(format!("Failed to write common/shlibs: {}", e));
