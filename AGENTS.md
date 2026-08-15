@@ -1,6 +1,6 @@
 # AGENTS.md — vxpm
 
-Updated: 2026-07-05
+Updated: 2026-08-15
 
 Rust/ratatui TUI for managing the ~17 custom packages in `~/void-packages` (hyprlock stack — hyprlock/hyprgraphics/hyprlang/hyprutils/hyprwayland-scanner/libspng — plus standalone tools like ghostty, zed, ollama, zen-browser, zig). Tracks versions, checks upstream, computes dependency-aware build order, rebuilds dependents, and drives the git workflow — replaces manual checking when bumping `hyprutils` requires rebuilding its dependents. (The Hyprland compositor ecosystem itself was retired 2026-05-23; its 17 dead templates were deleted 2026-07-05.) Published as `0x7461/vxpm` on GitHub; xbps-src template at `~/void-packages/srcpkgs/vxpm/template`.
 
@@ -115,6 +115,26 @@ Active operations (build / bump / git) all share the same Esc→confirm modal pa
 - **Zed distfiles:** `zed.dev/api/releases/stable/latest/` is a redirect → checksum breaks on upstream updates. Pin to `github.com/zed-industries/zed/releases/download/v${version}/`.
 - **Zed desktop rename (~v0.224):** `share/applications/zed.desktop` → `dev.zed.Zed.desktop`. Check with `tar -tzf ... | grep desktop` if `do_install` fails.
 - **Ollama binary repack:** `ollama-linux-amd64.tar.zst` has no top-level dir — use `create_wrksrc=yes`. CUDA runners (`lib/ollama/cuda_v12`, `cuda_v13`) drag in `libcuda.so.1` (no Void package) → skip in `do_install`, install CPU + Vulkan runners only.
+
+### Recovering an auto-bump that failed to fetch
+
+`vxpm-bumper` reports `xbps-fetch: failed to fetch <url> (null)` when the download fails — the
+`(null)` is xbps-fetch having no error string, not a URL problem, so **the URL in the message is
+usually fine**. Seen on zed 1.15.0 (2026-08-15). It can be environment-local: the same fetch failed
+from an agent shell over plain HTTP while the user's own environment was fine, so **a failure to
+reproduce it does not mean the bump is broken** — say so rather than concluding the template is at
+fault.
+
+Recovery is to place the distfile where xbps-src expects it and re-run the build; the checksum is
+then verified against the template as normal:
+
+```sh
+mkdir -p ~/void-packages/hostdir/sources/<pkg>-<version>
+curl -L -o ~/void-packages/hostdir/sources/<pkg>-<version>/<distfile> '<url-from-template>'
+```
+
+Confirm the checksum matches the template's `checksum=` before building — if it doesn't, the
+template really is stale and the bump needs a real fix, not a pre-seeded file.
 
 ## Workflows
 
