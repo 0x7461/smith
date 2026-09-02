@@ -166,5 +166,5 @@ git push origin v<x.y.z>
 ## Where to look
 
 - **`README.md`** — public feature list, full keybind reference, install instructions.
-- **`PLAN.md`** (local-only, gitignored) — `## Decisions`, `## Internals`, `## Operations / Publishing`, `## History`.
+- **`PLAN.md`** (local-only, gitignored) — `## Decisions`, `## Internals`, `## Operations / Publishing`. History is in `HISTORY.md`.
 - **`~/obsidian-vault/system/void-packages.md`** — git workflow + maintenance commands.
