@@ -5,6 +5,24 @@ Split from `PLAN.md` 2026-09-02 (see `agent-docs/PLAN.md` → the `HISTORY.md` t
 
 ---
 
+- **2026-09-23 — the four common/shlibs bugs, fixed together.**
+  They shared a root cause: `update_shlibs_file` worked on sonames alone and threw away everything
+  else the data carried. **(1)** It matched on soname only, so a bump to `libjava.so` could rewrite
+  openjdk8's line instead of openjdk17's — `common/shlibs` registers the same soname from several
+  packages upstream. The package name was already in `shlib_updates`; `app.rs` dropped it when
+  building the update vec. Now a typed `ShlibUpdate` carries it and matching requires both.
+  **(2)** Rewriting in place could produce a line that already existed two rows down (the real
+  `libhyprutils.so.10 -> .so.12` case). Both then read as provided, so `!so` cleared and the
+  duplicate became invisible and permanent. Dedupe pass after replacement, comments and blanks
+  exempt. **(3)** `"not found"` entries were `continue`d silently, leaving the badge lit with no
+  in-tool path to resolution — they are orphans whose fix is *deleting* the line, so they now come
+  back in a `ShlibUpdateReport` and the status line names them. **(4)** `parse_shlibs` discarded the
+  registered `pkgname-version_revision`, which is exactly what a soname comparison cannot check;
+  keeping it lets `check_soname_mismatches` catch a stale *version* on a correct soname — the case
+  that let `libhyprlang.so.2` sit registered twice. Mismatches are now typed
+  (`Bump` / `Orphaned` / `StaleVersion`) and the detail view names the action instead of "MISMATCH".
+  6 tests, each verified by mutation. 23 total.
+
 - **2026-07-05 — v0.7.0 (released)** — SONAME overhaul (see Decisions): `!so` checks now read `shlib-provides` metadata (installed pkgdb *and* built .xbps in local repos; built wins) — no more readelf per library, startup ~0.8s for 17 pkgs; pkglint `SONAME bump detected` build failures are parsed (`shlibs::parse_soname_bump_errors`) and staged into the `S`-apply flow with a rebuild hint (motivating case: hyprutils `.so.10→.so.12` needed two manual edit-rebuild cycles). Post-build success also re-checks against the fresh .xbps instead of startup data. README `s`→`S` keybind typo fixed. 3 new parser tests (17 total).
 - **2026-07-05** — GCC gate removed (see Decisions). `src/gcc.rs` deleted; badge, build-block and bulk-build skip logic stripped from `app.rs`/`ui.rs`/`main.rs`; `gcc_requirements.toml` trashed. 14 tests + clippy clean. Unreleased (next tag picks it up). SONAME-check-on-built-xbps improvement added to Backlog.
 - **2026-06-27 — v0.6.1** — Fixed the #2 source-build predicate. v0.6.0 compared *version only* and flagged a dep only when the local tree was *ahead* of the repo — but xbps-src builds the **exact** pkgver pinned in the local tree, so a tree *behind* the repo (e.g. local curl 8.20.0 vs remote 8.21.0) also triggers a source build, which v0.6.0 missed (false negative — real zed build compiled curl/sqlite/libxkbcommon/etc.). New predicate `binary_available_exact`: a dep builds from source unless a binary with its exact `version_revision` exists in the remote repos **or** `hostdir/binpkgs` (direction-agnostic, revision-aware, counts already-built deps). Test `local_binpkg_exact_match`.

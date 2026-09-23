@@ -11,6 +11,7 @@ use crate::app::{App, PanelMode, View};
 use crate::build::BuildJobStatus;
 use crate::dep_graph::TreeNode;
 use crate::package::Status;
+use crate::shlibs::MismatchKind;
 
 // Catppuccin Macchiato palette
 const GREEN: Color = Color::Rgb(166, 218, 149);
@@ -553,10 +554,27 @@ fn draw_detail(f: &mut Frame, app: &App, area: Rect) {
                 .iter()
                 .find(|m| m.registered == entry.soname);
             if let Some(m) = mismatch {
-                shlib_spans.push(Span::styled(
-                    format!("{} (installed: {} — MISMATCH) ", entry.soname, m.installed),
-                    Style::default().fg(PEACH),
-                ));
+                // Name the action, not just "MISMATCH". A bump is rewritable by
+                // S; an orphaned entry never will be, and saying so is the
+                // difference between a badge and a dead end.
+                let (text, color) = match m.kind {
+                    MismatchKind::Bump => (
+                        format!("{} (installed: {} — bump, S rewrites) ", entry.soname, m.installed),
+                        PEACH,
+                    ),
+                    MismatchKind::Orphaned => (
+                        format!("{} (no counterpart — needs manual removal) ", entry.soname),
+                        RED,
+                    ),
+                    MismatchKind::StaleVersion => (
+                        format!(
+                            "{} (registered {}, template {} — stale version, S rewrites) ",
+                            entry.soname, entry.pkgver, m.installed
+                        ),
+                        PEACH,
+                    ),
+                };
+                shlib_spans.push(Span::styled(text, Style::default().fg(color)));
             } else {
                 shlib_spans.push(Span::styled(
                     format!("{} (OK) ", entry.soname),

@@ -10,9 +10,17 @@ use crate::dep_graph::DepGraph;
 use crate::git::{self, GitMsg, GitOp, GitStatus};
 use crate::package::{Package, PackageState, Status};
 use crate::repo;
-use crate::shlibs::{self, ShlibMap};
+use crate::shlibs::{self, ShlibMap, ShlibUpdate};
 use crate::template;
 use crate::version_check;
+
+/// The `pkgname-version_revision` a correct common/shlibs line would carry for
+/// this package. One spelling, one place — the three mismatch call sites and
+/// the update path all derive the string from here rather than each formatting
+/// their own.
+fn template_pkgver(pkg: &Package) -> String {
+    format!("{}-{}_{}", pkg.name, pkg.version, pkg.revision)
+}
 
 pub enum TemplateBumpMsg {
     Started(std::path::PathBuf),        // log_path — sent before bump begins
@@ -106,8 +114,12 @@ impl App {
         for state in &mut states {
             if let Some(entries) = shlib_map.get(&state.package.name) {
                 state.shlibs = entries.clone();
-                state.soname_mismatches =
-                    shlibs::check_soname_mismatches(&void_pkgs, entries, &state.package.name);
+                state.soname_mismatches = shlibs::check_soname_mismatches(
+                    &void_pkgs,
+                    entries,
+                    &state.package.name,
+                    &template_pkgver(&state.package),
+                );
             }
         }
 
@@ -272,6 +284,7 @@ impl App {
                         &self.void_pkgs,
                         entries,
                         &state.package.name,
+                        &template_pkgver(&state.package),
                     );
                 }
             }
@@ -578,18 +591,24 @@ impl App {
                                     &self.void_pkgs,
                                     entries,
                                     &name,
+                                    &template_pkgver(&state.package),
                                 );
                             }
+                            let pkg_ver = template_pkgver(&state.package);
                             for mm in &state.soname_mismatches {
-                                let pkg_ver = format!(
-                                    "{}-{}_{}",
-                                    state.package.name, state.package.version, state.package.revision
-                                );
+                                // A stale *version* keeps its soname — only the
+                                // pkgver field is wrong, so the rewrite target
+                                // is the same soname, not `installed` (which
+                                // holds the expected pkgver for that kind).
+                                let new_soname = match mm.kind {
+                                    shlibs::MismatchKind::StaleVersion => mm.registered.clone(),
+                                    _ => mm.installed.clone(),
+                                };
                                 self.shlib_updates.push((
                                     state.package.name.clone(),
                                     mm.registered.clone(),
-                                    mm.installed.clone(),
-                                    pkg_ver,
+                                    new_soname,
+                                    pkg_ver.clone(),
                                 ));
                             }
                         }
@@ -795,15 +814,22 @@ impl App {
             return;
         }
 
-        let updates: Vec<(String, String, String)> = self
+        // Carry the package name through. It was dropped here, which left
+        // update_shlibs_file matching on soname alone — and common/shlibs
+        // registers the same soname from several packages upstream.
+        let updates: Vec<ShlibUpdate> = self
             .shlib_updates
             .iter()
-            .map(|(_, old, new, pkgver)| (old.clone(), new.clone(), pkgver.clone()))
+            .map(|(pkg, old, new, pkgver)| ShlibUpdate {
+                pkg_name: pkg.clone(),
+                old_soname: old.clone(),
+                new_soname: new.clone(),
+                new_pkg_ver: pkgver.clone(),
+            })
             .collect();
 
         match shlibs::update_shlibs_file(&self.void_pkgs, &updates) {
-            Ok(()) => {
-                let count = self.shlib_updates.len();
+            Ok(report) => {
                 let touched: Vec<String> =
                     self.shlib_updates.iter().map(|(p, _, _, _)| p.clone()).collect();
                 self.shlib_updates.clear();
@@ -817,15 +843,25 @@ impl App {
                     })
                     .map(|s| s.package.name.as_str())
                     .collect();
-                self.status_msg = Some(if needs_rebuild.is_empty() {
-                    format!("Updated {} shlib entries", count)
-                } else {
-                    format!(
-                        "Updated {} shlib entries — rebuild with b: {}",
-                        count,
-                        needs_rebuild.join(", ")
-                    )
-                });
+
+                // Report what happened, not how many were requested. An entry
+                // that could not be rewritten used to vanish into a no-op with
+                // the badge still lit and nothing naming the reason.
+                let mut msg = format!("Updated {} shlib entries", report.rewritten);
+                if report.deduped > 0 {
+                    msg.push_str(&format!(", removed {} duplicate line(s)", report.deduped));
+                }
+                if !needs_rebuild.is_empty() {
+                    msg.push_str(&format!(" — rebuild with b: {}", needs_rebuild.join(", ")));
+                }
+                if !report.unmatched.is_empty() {
+                    msg.push_str(&format!(
+                        " — {} need attention: {}",
+                        report.unmatched.len(),
+                        report.unmatched.join("; ")
+                    ));
+                }
+                self.status_msg = Some(msg);
             }
             Err(e) => {
                 self.status_msg = Some(format!("Failed to write common/shlibs: {}", e));
