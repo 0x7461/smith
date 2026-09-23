@@ -114,3 +114,205 @@ pub struct TreeNode {
     pub name: String,
     pub children: Vec<TreeNode>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A package with only the fields the graph reads. `deps` go in
+    /// `makedepends` unless a test needs a specific list.
+    fn pkg(name: &str, deps: &[&str]) -> Package {
+        Package {
+            name: name.into(),
+            version: "1.0".into(),
+            revision: 1,
+            short_desc: String::new(),
+            homepage: String::new(),
+            build_style: String::new(),
+            makedepends: deps.iter().map(|s| s.to_string()).collect(),
+            hostmakedepends: vec![],
+            depends: vec![],
+            distfiles: String::new(),
+            changelog: String::new(),
+        }
+    }
+
+    /// Position of a package in the build order. Panics if it was dropped —
+    /// which is the point: a missing package is never a passing assertion.
+    fn pos(order: &[String], name: &str) -> usize {
+        order
+            .iter()
+            .position(|n| n == name)
+            .unwrap_or_else(|| panic!("{} missing from build order: {:?}", name, order))
+    }
+
+    /// The real shape this tool exists for: bumping hyprutils must rebuild the
+    /// things that link it.
+    fn hypr_stack() -> Vec<Package> {
+        vec![
+            pkg("hyprutils", &[]),
+            pkg("hyprlang", &["hyprutils-devel"]),
+            pkg("hyprgraphics", &["hyprutils-devel"]),
+            pkg("hyprlock", &["hyprlang-devel", "hyprgraphics-devel", "hyprutils-devel"]),
+        ]
+    }
+
+    // ── build ───────────────────────────────────────────────────────
+
+    #[test]
+    fn devel_suffix_is_stripped_to_the_base_package() {
+        // Templates depend on `hyprutils-devel`; the graph is keyed on `hyprutils`.
+        // Without the strip every edge in the hypr stack silently disappears.
+        let g = DepGraph::build(&hypr_stack());
+        assert!(g.forward["hyprlang"].contains("hyprutils"));
+        assert!(g.reverse["hyprutils"].contains("hyprlang"));
+    }
+
+    #[test]
+    fn external_dependencies_are_not_edges() {
+        // Only inter-custom edges matter — cmake is not ours to build.
+        let g = DepGraph::build(&[pkg("hyprutils", &["cmake", "pixman-devel"])]);
+        assert!(g.forward["hyprutils"].is_empty());
+    }
+
+    #[test]
+    fn a_package_is_not_its_own_dependency() {
+        // A self-edge would give it in_degree 1 forever and drop it silently.
+        let g = DepGraph::build(&[pkg("zig", &["zig-devel", "zig"])]);
+        assert!(g.forward["zig"].is_empty());
+        assert_eq!(DepGraph::build(&[pkg("zig", &["zig"])]).topological_sort(), vec!["zig"]);
+    }
+
+    #[test]
+    fn all_three_dependency_lists_are_read() {
+        let mut p = pkg("hyprlock", &["hyprutils-devel"]);
+        p.hostmakedepends = vec!["hyprwayland-scanner".into()];
+        p.depends = vec!["hyprlang-devel".into()];
+        let g = DepGraph::build(&[
+            pkg("hyprutils", &[]),
+            pkg("hyprwayland-scanner", &[]),
+            pkg("hyprlang", &[]),
+            p,
+        ]);
+        let deps = &g.forward["hyprlock"];
+        assert!(deps.contains("hyprutils"), "makedepends dropped");
+        assert!(deps.contains("hyprwayland-scanner"), "hostmakedepends dropped");
+        assert!(deps.contains("hyprlang"), "depends dropped");
+    }
+
+    #[test]
+    fn every_package_gets_an_entry_even_with_no_edges() {
+        let g = DepGraph::build(&[pkg("ghostty", &[]), pkg("zed", &[])]);
+        assert!(g.forward.contains_key("ghostty") && g.reverse.contains_key("zed"));
+    }
+
+    // ── topological_sort ────────────────────────────────────────────
+
+    #[test]
+    fn dependencies_are_built_before_dependents() {
+        // Relative order only: the sort iterates a HashMap, so the sequence
+        // within a tier is not stable and asserting it would flake.
+        let order = DepGraph::build(&hypr_stack()).topological_sort();
+        assert_eq!(order.len(), 4);
+        assert!(pos(&order, "hyprutils") < pos(&order, "hyprlang"));
+        assert!(pos(&order, "hyprutils") < pos(&order, "hyprgraphics"));
+        assert!(pos(&order, "hyprlang") < pos(&order, "hyprlock"));
+        assert!(pos(&order, "hyprgraphics") < pos(&order, "hyprlock"));
+    }
+
+    #[test]
+    fn unrelated_packages_all_appear() {
+        let g = DepGraph::build(&[pkg("ghostty", &[]), pkg("zed", &[]), pkg("ollama", &[])]);
+        assert_eq!(g.topological_sort().len(), 3);
+    }
+
+    #[test]
+    fn a_dependency_cycle_silently_drops_its_members() {
+        // KNOWN LIMITATION, pinned so a change is deliberate. Kahn's algorithm
+        // never reaches in_degree 0 inside a cycle, and this returns the partial
+        // result with no error — the cycle's packages are simply never built.
+        // Unrelated packages still come through, which is what makes it quiet.
+        let g = DepGraph::build(&[
+            pkg("a", &["b"]),
+            pkg("b", &["a"]),
+            pkg("ghostty", &[]),
+        ]);
+        let order = g.topological_sort();
+        assert_eq!(order, vec!["ghostty"]);
+        assert!(!order.contains(&"a".to_string()));
+    }
+
+    // ── reverse_dep_tree ────────────────────────────────────────────
+
+    #[test]
+    fn reverse_tree_lists_what_a_bump_must_rebuild() {
+        let g = DepGraph::build(&hypr_stack());
+        let tree = g.reverse_dep_tree("hyprutils");
+        let names: Vec<&str> = tree.iter().map(|n| n.name.as_str()).collect();
+        assert_eq!(names, vec!["hyprgraphics", "hyprlang", "hyprlock"], "children are sorted");
+    }
+
+    #[test]
+    fn a_leaf_has_no_dependents() {
+        assert!(DepGraph::build(&hypr_stack()).reverse_dep_tree("hyprlock").is_empty());
+    }
+
+    fn count(nodes: &[TreeNode], name: &str, seen: &mut usize) {
+        for n in nodes {
+            if n.name == name {
+                *seen += 1;
+            }
+            count(&n.children, name, seen);
+        }
+    }
+
+    #[test]
+    fn a_diamond_lists_the_shared_dependent_once_per_path() {
+        // `visited` prunes the sub*tree*, not the node — the node is pushed
+        // before the guard is consulted. So in the hypr diamond hyprlock shows
+        // three times: under hyprutils directly, and under each of hyprlang and
+        // hyprgraphics. Not a defect — each really is a path a rebuild travels —
+        // but pinned because it is not what the `visited` set looks like it does.
+        let g = DepGraph::build(&hypr_stack());
+        let tree = g.reverse_dep_tree("hyprutils");
+        let mut seen = 0;
+        count(&tree, "hyprlock", &mut seen);
+        assert_eq!(seen, 3);
+    }
+
+    #[test]
+    fn only_the_first_occurrence_carries_its_children() {
+        // The consequence of the above, and the sharper edge: a node reached
+        // again renders as a leaf even when it has dependents of its own, so a
+        // repeat occurrence understates what a bump rebuilds.
+        let g = DepGraph::build(&[
+            pkg("base", &[]),
+            pkg("mid_a", &["base"]),
+            pkg("mid_b", &["base"]),
+            pkg("shared", &["mid_a", "mid_b"]),
+            pkg("top", &["shared"]),
+        ]);
+        let tree = g.reverse_dep_tree("base");
+
+        let mut with_children = 0;
+        fn walk(nodes: &[TreeNode], name: &str, n: &mut usize) {
+            for node in nodes {
+                if node.name == name && !node.children.is_empty() {
+                    *n += 1;
+                }
+                walk(&node.children, name, n);
+            }
+        }
+        walk(&tree, "shared", &mut with_children);
+
+        let mut total = 0;
+        count(&tree, "shared", &mut total);
+        assert!(total > with_children, "expected a repeat occurrence rendered as a leaf");
+        assert_eq!(with_children, 1, "only one occurrence expands its subtree");
+    }
+
+    #[test]
+    fn an_unknown_package_has_an_empty_tree() {
+        assert!(DepGraph::build(&hypr_stack()).reverse_dep_tree("nope").is_empty());
+    }
+}

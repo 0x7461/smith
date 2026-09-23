@@ -5,6 +5,20 @@ Split from `PLAN.md` 2026-09-02 (see `agent-docs/PLAN.md` → the `HISTORY.md` t
 
 ---
 
+- **2026-09-23 — `dep_graph.rs` 0 → 13 tests, and two surprises.**
+  116 lines, no I/O, and it decides build order — the reason the tool exists ("bumping hyprutils
+  requires rebuilding its dependents") — with nothing covering it. A wrong order does not crash; it
+  links against a stale library and shows up later. Covered: `-devel` stripping (without it every
+  edge in the hypr stack vanishes), external deps excluded, self-edges excluded, all three dependency
+  lists read, and dependency-before-dependent ordering asserted **relatively** — `topological_sort`
+  iterates a HashMap, so within-tier order is unstable and asserting a sequence would flake.
+  **Two findings.** `topological_sort` drops cycle members silently while unrelated packages come
+  through (filed in Backlog, pinned as current behaviour). And `reverse_dep_tree`'s `visited` set
+  prunes the sub*tree*, not the node: in a diamond the shared dependent is listed once per path, and
+  only the first occurrence expands its children — so a repeat renders as a leaf and understates what
+  a bump rebuilds. Both pinned rather than changed. Mutation-verified: removing the `-devel` strip
+  turns 5 red, removing the self-edge guard turns 1. 36 tests total.
+
 - **2026-09-23 — the four common/shlibs bugs, fixed together.**
   They shared a root cause: `update_shlibs_file` worked on sonames alone and threw away everything
   else the data carried. **(1)** It matched on soname only, so a bump to `libjava.so` could rewrite
