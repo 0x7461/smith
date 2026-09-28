@@ -12,7 +12,7 @@ Audience: agents editing this repo. Public-facing feature list + keybinds in `RE
 cargo build --release
 ```
 
-Rust toolchain via `rustup` (not proto). Requires Void Linux with `xbps-query`, `xbps-src` on `PATH`.
+Rust toolchain via `rustup` (not mise). Requires Void Linux with `xbps-query`, `xbps-src` on `PATH`.
 
 ## Commands
 
