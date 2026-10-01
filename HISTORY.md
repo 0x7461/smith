@@ -36,7 +36,10 @@ Split from `PLAN.md` 2026-09-02 (see `agent-docs/PLAN.md` → the `HISTORY.md` t
   a bump rebuilds. Both pinned rather than changed. Mutation-verified: removing the `-devel` strip
   turns 5 red, removing the self-edge guard turns 1. 36 tests total.
 
-- **2026-09-23 — the four common/shlibs bugs, fixed together.**
+- **2026-09-23 — the four common/shlibs bugs, fixed together.** Found 2026-07-27 when rebasing
+  `custom` onto three weeks of upstream left both upstream's and our registrations in place; hand-fixed
+  then in void-packages `95de62395c0`. Detection was fine (`hyprutils !so` flagged correctly); the
+  gaps were all in the fix path and coverage.
   They shared a root cause: `update_shlibs_file` worked on sonames alone and threw away everything
   else the data carried. **(1)** It matched on soname only, so a bump to `libjava.so` could rewrite
   openjdk8's line instead of openjdk17's — `common/shlibs` registers the same soname from several
