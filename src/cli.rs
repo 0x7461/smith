@@ -1,6 +1,6 @@
 //! Non-interactive CLI surface. Drives the same primitives as the TUI:
 //! `version_check::check_all_versions_streaming` and `template::bump_template`.
-//! Designed to be composed from runit/cron wrappers (see [[maint-watch]]).
+//! Designed to be composed from runit/cron wrappers (see [[caretaker]]).
 
 use std::collections::HashMap;
 use std::path::Path;
