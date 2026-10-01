@@ -731,7 +731,13 @@ impl App {
             return;
         }
 
-        let topo = self.dep_graph.topological_sort();
+        let topo = match self.dep_graph.topological_sort() {
+            Ok(topo) => topo,
+            Err(unresolved) => {
+                self.status_msg = Some(format!("Dependency cycle — cannot order: {}", unresolved));
+                return;
+            }
+        };
         let ordered: Vec<String> = topo.into_iter().filter(|n| buildable.contains(n)).collect();
 
         self.status_msg = Some(format!("Building {} packages...", ordered.len()));

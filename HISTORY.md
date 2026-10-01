@@ -5,6 +5,17 @@ Split from `PLAN.md` 2026-09-02 (see `agent-docs/PLAN.md` → the `HISTORY.md` t
 
 ---
 
+- **2026-10-01 — `topological_sort` reports cycles instead of dropping them.**
+  It returned the partial Kahn order, so a cycle's packages never appeared in the build order while
+  unrelated packages came through normally — a silent omission of exactly the kind the template
+  work keeps hitting. Now `Result<Vec<String>, UnresolvedDeps>`: the length check against `forward`
+  is the trigger, and `UnresolvedDeps.packages` names the cycle members *and* everything downstream
+  of them (a dependent of a cycle also never reaches in_degree 0, so it is equally unbuildable).
+  `app.rs::build_all_buildable` refuses the run and prints the names in the status line rather than
+  building a subset. The pinned `a_dependency_cycle_silently_drops_its_members` is replaced by
+  `a_dependency_cycle_is_reported_not_dropped` and `a_cycle_also_reports_what_depends_on_it`.
+  37 tests.
+
 - **2026-09-23 — `dep_graph.rs` 0 → 13 tests, and two surprises.**
   116 lines, no I/O, and it decides build order — the reason the tool exists ("bumping hyprutils
   requires rebuilding its dependents") — with nothing covering it. A wrong order does not crash; it
