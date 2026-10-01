@@ -1,4 +1,4 @@
-# vxpm
+# smith
 
 A terminal UI for managing custom [void-packages](https://github.com/void-linux/void-packages) templates.
 
@@ -35,35 +35,35 @@ Built for the workflow of maintaining self-built packages on Void Linux — trac
 | `?` | Help |
 | `q` | Quit |
 
-Before a build, vxpm runs pre-flight checks and shows a warning modal if the masterdir has leftover build state or dependencies would compile from source. In the modal: `c` = clean & build, `b` = build anyway, `Esc`/`q` = dismiss (do nothing).
+Before a build, smith runs pre-flight checks and shows a warning modal if the masterdir has leftover build state or dependencies would compile from source. In the modal: `c` = clean & build, `b` = build anyway, `Esc`/`q` = dismiss (do nothing).
 
 ## Non-interactive CLI
 
 For cron/runit automation:
 
 ```sh
-vxpm check-updates           # list "<name> <cur> -> <latest>" lines
-vxpm check-updates --json    # same, as JSON
-vxpm bump <pkg>              # bump one template + checksum (no build)
-vxpm bump --all              # bump every UpstreamAhead pkg
+smith check-updates           # list "<name> <cur> -> <latest>" lines
+smith check-updates --json    # same, as JSON
+smith bump <pkg>              # bump one template + checksum (no build)
+smith bump --all              # bump every UpstreamAhead pkg
 ```
 
 Exit codes (grep convention): `0` = no updates / success, `1` = updates available / partial failure, `2` = GitHub rate-limited.
 
 ## Install
 
-Download the binary from [releases](https://github.com/0x7461/vxpm/releases) or build from source:
+Download the binary from [releases](https://github.com/0x7461/smith/releases) or build from source:
 
 ```sh
 cargo build --release
-# Binary at target/release/vxpm
+# Binary at target/release/smith
 ```
 
 ## Requirements
 
 - Void Linux with [void-packages](https://github.com/void-linux/void-packages) checked out
 - `xbps-query`, `xbps-src` in PATH
-- Config: `~/.config/vxpm/config.toml` (auto-created on first run)
+- Config: `~/.config/smith/config.toml` (auto-created on first run)
 
 ## License
 

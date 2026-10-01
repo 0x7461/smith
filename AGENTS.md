@@ -1,8 +1,8 @@
-# AGENTS.md — vxpm
+# AGENTS.md — smith
 
 Updated: 2026-09-24
 
-Rust/ratatui TUI for managing the ~17 custom packages in `~/void-packages` (hyprlock stack — hyprlock/hyprgraphics/hyprlang/hyprutils/hyprwayland-scanner/libspng — plus standalone tools like ghostty, zed, ollama, zen-browser, zig). Tracks versions, checks upstream, computes dependency-aware build order, rebuilds dependents, and drives the git workflow — replaces manual checking when bumping `hyprutils` requires rebuilding its dependents. (The Hyprland compositor ecosystem itself was retired 2026-05-23; its 17 dead templates were deleted 2026-07-05.) Published as `0x7461/vxpm` on GitHub; xbps-src template at `~/void-packages/srcpkgs/vxpm/template`.
+Rust/ratatui TUI for managing the ~17 custom packages in `~/void-packages` (hyprlock stack — hyprlock/hyprgraphics/hyprlang/hyprutils/hyprwayland-scanner/libspng — plus standalone tools like ghostty, zed, ollama, zen-browser, zig). Tracks versions, checks upstream, computes dependency-aware build order, rebuilds dependents, and drives the git workflow — replaces manual checking when bumping `hyprutils` requires rebuilding its dependents. (The Hyprland compositor ecosystem itself was retired 2026-05-23; its 17 dead templates were deleted 2026-07-05.) Published as `0x7461/smith` on GitHub; xbps-src template at `~/void-packages/srcpkgs/smith/template`.
 
 Audience: agents editing this repo. Public-facing feature list + keybinds in `README.md`. Decisions, internals, history in `PLAN.md` (local-only — gitignored).
 
@@ -19,12 +19,12 @@ Rust toolchain via `rustup` (not mise). Requires Void Linux with `xbps-query`, `
 ```bash
 # Build & run
 cargo build --release
-./target/release/vxpm                    # interactive TUI
-./target/release/vxpm dump               # non-interactive package state dump (JSON)
-./target/release/vxpm check-updates      # list pkgs with upstream updates (exit 0/1/2)
-./target/release/vxpm check-updates --json
-./target/release/vxpm bump <pkg>         # bump one template + checksum (no build)
-./target/release/vxpm bump --all         # bump every pkg with an upstream update
+./target/release/smith                    # interactive TUI
+./target/release/smith dump               # non-interactive package state dump (JSON)
+./target/release/smith check-updates      # list pkgs with upstream updates (exit 0/1/2)
+./target/release/smith check-updates --json
+./target/release/smith bump <pkg>         # bump one template + checksum (no build)
+./target/release/smith bump --all         # bump every pkg with an upstream update
 
 # Tests / lints
 cargo test
@@ -35,7 +35,7 @@ cargo clippy --all-targets
 # `cargo build` to refresh Cargo.lock. Then: git tag v<x.y.z>, push tag → GH Actions builds.
 ```
 
-Config bootstrap: `~/.config/vxpm/config.toml` is auto-created on first run.
+Config bootstrap: `~/.config/smith/config.toml` is auto-created on first run.
 
 ## Project layout
 
@@ -57,9 +57,9 @@ src/
 
 External integration points:
 - `~/void-packages/` — discovery, build, git ops all target this repo (configurable in `config.toml`).
-- `~/.config/vxpm/config.toml` — user config.
-- `~/.cache/vxpm/build_history.json` — persisted build history.
-- `~/.cache/vxpm/logs/<pkg>-<ts>.log` and `<pkg>-bump-<ts>.log` — build/bump logs.
+- `~/.config/smith/config.toml` — user config.
+- `~/.cache/smith/build_history.json` — persisted build history.
+- `~/.cache/smith/logs/<pkg>-<ts>.log` and `<pkg>-bump-<ts>.log` — build/bump logs.
 - `~/void-packages/hostdir/sources/<filename>` — download cache (avoids double-download with xbps-src).
 
 ## Status pipeline
@@ -82,7 +82,7 @@ Badges: `↑` = upstream update available; `!so` = SONAME mismatch. (The `GCC N+
 - **Run pre-build checks via `build::preflight()` off-thread** (spawned in `gate_build`, drained by `poll_preflight`). They shell out to `xbps-src show-build-deps` + `xbps-query -R` (~1.5s for one build, more for `B`); running synchronously freezes the UI. Build jobs stage in `build_queue.jobs` and only `start()` once pre-flight clears or the user proceeds.
 - **Use `default-features = false, features = ["rustls-tls"]` for `reqwest`.** Default features pull `openssl-sys`; rustls-tls works on Void without system openssl-dev.
 - **Stream large downloads, hash in 64KB chunks.** `.bytes()` buffers in memory and times out on tarballs like ollama (~1.9 GB). See `version_check.rs`.
-- **Cache downloads to `hostdir/sources/<filename>`.** `download_and_checksum` streams to disk while hashing; if the file is already present, skip the network. Avoids double-download (vxpm + xbps-src).
+- **Cache downloads to `hostdir/sources/<filename>`.** `download_and_checksum` streams to disk while hashing; if the file is already present, skip the network. Avoids double-download (smith + xbps-src).
 - **Use `git log --name-only --pretty=format: master..custom -- srcpkgs/`** for package discovery, NOT `git diff`. `diff` shows 141 diverged upstream files; `log` shows only the ~26 touched by custom commits.
 - **Strip `.arch.xbps` with `rfind('.')`,** not first dot — versions contain dots.
 - **Filter subpackages by checking the character after `name-` is a digit** when scanning built .xbps.
@@ -118,7 +118,7 @@ Active operations (build / bump / git) all share the same Esc→confirm modal pa
 
 ### Recovering an auto-bump that failed to fetch
 
-`vxpm-bumper` reports `xbps-fetch: failed to fetch <url> (null)` when the download fails — the
+`smith-bumper` reports `xbps-fetch: failed to fetch <url> (null)` when the download fails — the
 `(null)` is xbps-fetch having no error string, not a URL problem, so **the URL in the message is
 usually fine**. Seen on zed 1.15.0 (2026-08-15). It can be environment-local: the same fetch failed
 from an agent shell over plain HTTP while the user's own environment was fine, so **a failure to
@@ -144,7 +144,7 @@ Full step-by-step in [`PLAN.md ## Operations / Publishing`](./PLAN.md#operations
 1. Bump version in `Cargo.toml`.
 2. `git tag v<x.y.z>`, push tag.
 3. GH Actions workflow builds release binary and creates GitHub release. Required: `permissions: contents: write` in workflow (or upload fails with "Resource not accessible by integration").
-4. Update xbps-src template at `~/void-packages/srcpkgs/vxpm/template` with new version + checksum.
+4. Update xbps-src template at `~/void-packages/srcpkgs/smith/template` with new version + checksum.
 
 ### `u` vs `U` (version checks)
 

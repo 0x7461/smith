@@ -28,7 +28,7 @@ fn main() -> Result<()> {
     if let Some(arg) = args.get(1).map(String::as_str) {
         match arg {
             "--version" | "-V" => {
-                println!("vxpm {}", env!("CARGO_PKG_VERSION"));
+                println!("smith {}", env!("CARGO_PKG_VERSION"));
                 return Ok(());
             }
             "--help" | "-h" => {
@@ -56,16 +56,16 @@ fn main() -> Result<()> {
 }
 
 fn print_help() {
-    println!("vxpm {} — TUI for managing custom void-packages templates", env!("CARGO_PKG_VERSION"));
+    println!("smith {} — TUI for managing custom void-packages templates", env!("CARGO_PKG_VERSION"));
     println!();
     println!("USAGE:");
-    println!("    vxpm                          Launch the interactive TUI");
-    println!("    vxpm dump                     Print package state as JSON and exit");
-    println!("    vxpm check-updates [--json]   List packages with upstream updates");
-    println!("    vxpm bump <pkg>               Bump template + checksum for one package");
-    println!("    vxpm bump --all               Bump every package with an upstream update");
-    println!("    vxpm --version|-V             Print version and exit");
-    println!("    vxpm --help|-h                Print this help and exit");
+    println!("    smith                          Launch the interactive TUI");
+    println!("    smith dump                     Print package state as JSON and exit");
+    println!("    smith check-updates [--json]   List packages with upstream updates");
+    println!("    smith bump <pkg>               Bump template + checksum for one package");
+    println!("    smith bump --all               Bump every package with an upstream update");
+    println!("    smith --version|-V             Print version and exit");
+    println!("    smith --help|-h                Print this help and exit");
     println!();
     println!("In-TUI keybinds: press ? after launch, or see README.md.");
 }

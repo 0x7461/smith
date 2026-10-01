@@ -27,7 +27,7 @@ struct GitHubRelease {
 }
 
 fn cache_path() -> PathBuf {
-    let dir = dirs_cache().join("vxpm");
+    let dir = dirs_cache().join("smith");
     fs::create_dir_all(&dir).ok();
     dir.join("versions.json")
 }
@@ -109,7 +109,7 @@ fn check_github(owner: &str, repo: &str) -> Result<Option<String>> {
     let client = reqwest::blocking::Client::new();
     let resp = client
         .get(&url)
-        .header("User-Agent", "vxpm/0.4")
+        .header("User-Agent", "smith/0.8")
         .header("Accept", "application/vnd.github+json")
         .send()?;
 
@@ -128,7 +128,7 @@ fn check_github(owner: &str, repo: &str) -> Result<Option<String>> {
         );
         let resp = client
             .get(&url)
-            .header("User-Agent", "vxpm/0.4")
+            .header("User-Agent", "smith/0.8")
             .header("Accept", "application/vnd.github+json")
             .send()?;
 

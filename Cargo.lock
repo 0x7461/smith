@@ -1229,6 +1229,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
+name = "smith"
+version = "0.8.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "crossterm",
+ "ratatui",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "toml",
+]
+
+[[package]]
 name = "socket2"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1565,21 +1580,6 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
-
-[[package]]
-name = "vxpm"
-version = "0.7.0"
-dependencies = [
- "anyhow",
- "chrono",
- "crossterm",
- "ratatui",
- "reqwest",
- "serde",
- "serde_json",
- "sha2",
- "toml",
-]
 
 [[package]]
 name = "want"

@@ -5,6 +5,7 @@ Split from `PLAN.md` 2026-09-02 (see `agent-docs/PLAN.md` → the `HISTORY.md` t
 
 ---
 
+- **2026-10-01** — **Renamed vxpm → smith, v0.8.0** (#89 town-roles theme: builds the packages). Crate, binary, help text, user agent, release asset (`smith-linux-x86_64.tar.gz`), auto-bump marker (`# smith-auto-bump: true`). `~/.config/vxpm` and `~/.cache/vxpm` migrate to `smith/` on first run (extends the old `vpm/` migration; tested in a throwaway HOME).
 - **2026-10-01 — `topological_sort` reports cycles instead of dropping them.**
   It returned the partial Kahn order, so a cycle's packages never appeared in the build order while
   unrelated packages came through normally — a silent omission of exactly the kind the template

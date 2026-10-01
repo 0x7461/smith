@@ -185,7 +185,7 @@ fn resolve_distfiles_url(raw: &str, vars: &HashMap<String, String>, new_version:
 /// silently checksum the wrong artifact.
 fn download_and_checksum(url: &str, cache_filename: &str, sources_dir: &Path, cancel: &Arc<AtomicBool>, force: bool) -> Result<String> {
     let client = reqwest::blocking::Client::builder()
-        .user_agent("vxpm/0.4")
+        .user_agent("smith/0.8")
         .redirect(reqwest::redirect::Policy::limited(10))
         .connect_timeout(std::time::Duration::from_secs(30))
         .build()?;

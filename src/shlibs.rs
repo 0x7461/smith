@@ -331,7 +331,7 @@ mod tests {
     /// Same no-dependency idiom as `build.rs` tests — pid-tagged, caller cleans up.
     fn fixture(tag: &str, lines: &[&str]) -> std::path::PathBuf {
         let root = std::env::temp_dir()
-            .join(format!("vxpm-shlibs-{}-{}", tag, std::process::id()));
+            .join(format!("smith-shlibs-{}-{}", tag, std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("common")).unwrap();
         std::fs::write(root.join("common/shlibs"), format!("{}\n", lines.join("\n"))).unwrap();

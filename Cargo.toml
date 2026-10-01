@@ -1,6 +1,6 @@
 [package]
-name = "vxpm"
-version = "0.7.0"
+name = "smith"
+version = "0.8.0"
 edition = "2021"
 
 [dependencies]

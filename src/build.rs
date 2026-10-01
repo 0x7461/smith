@@ -79,7 +79,7 @@ impl BuildHistory {
         let cache = std::env::var("XDG_CACHE_HOME")
             .or_else(|_| std::env::var("HOME").map(|h| format!("{}/.cache", h)))
             .unwrap_or_else(|_| "/tmp".to_string());
-        PathBuf::from(cache).join("vxpm/build_history.json")
+        PathBuf::from(cache).join("smith/build_history.json")
     }
 }
 
@@ -118,7 +118,7 @@ fn log_dir() -> PathBuf {
     let cache = std::env::var("XDG_CACHE_HOME")
         .or_else(|_| std::env::var("HOME").map(|h| format!("{}/.cache", h)))
         .unwrap_or_else(|_| "/tmp".to_string());
-    PathBuf::from(cache).join("vxpm/logs")
+    PathBuf::from(cache).join("smith/logs")
 }
 
 fn chrono_timestamp() -> String {
@@ -514,7 +514,7 @@ mod tests {
     use super::*;
 
     fn temp_void_pkgs(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("vxpm-test-{}-{}", tag, std::process::id()));
+        let dir = std::env::temp_dir().join(format!("smith-test-{}-{}", tag, std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
