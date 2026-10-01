@@ -13,7 +13,11 @@ pub struct DepGraph {
 /// dependency cycles, plus everything downstream of one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnresolvedDeps {
+    /// The packages that could not be ordered, sorted.
     pub packages: Vec<String>,
+    /// Build order of the packages that *could* be ordered, so a caller that
+    /// only wanted a subset of them does not lose the order to this error.
+    pub order: Vec<String>,
 }
 
 impl std::fmt::Display for UnresolvedDeps {
@@ -107,10 +111,40 @@ impl DepGraph {
                 .cloned()
                 .collect();
             packages.sort();
-            return Err(UnresolvedDeps { packages });
+            return Err(UnresolvedDeps { packages, order: result });
         }
 
         Ok(result)
+    }
+
+    /// Order `wanted` for building, reporting unresolved packages rather than
+    /// letting them block or vanish.
+    ///
+    /// An unresolved package inside `wanted` fails the whole call: it can never
+    /// be built, and `Err` names exactly those packages (the unresolved ones
+    /// outside `wanted` are not the caller's problem yet). An unresolved
+    /// package outside `wanted` does not block anything — the order of the rest
+    /// is still valid — so it comes back alongside the jobs for the caller to
+    /// report.
+    pub fn plan_build_order(
+        &self,
+        wanted: &HashSet<String>,
+    ) -> Result<(Vec<String>, Vec<String>), UnresolvedDeps> {
+        let unresolved = match self.topological_sort() {
+            Ok(order) => return Ok((wanted_jobs(order, wanted), Vec::new())),
+            Err(unresolved) => unresolved,
+        };
+
+        let (blocked, outside): (Vec<String>, Vec<String>) = unresolved
+            .packages
+            .into_iter()
+            .partition(|n| wanted.contains(n));
+
+        if !blocked.is_empty() {
+            return Err(UnresolvedDeps { packages: blocked, order: unresolved.order });
+        }
+
+        Ok((wanted_jobs(unresolved.order, wanted), outside))
     }
 
 /// Get tree of reverse dependencies for a package (for tree view).
@@ -138,6 +172,11 @@ impl DepGraph {
         }
         children
     }
+}
+
+/// Filter a full build order down to the packages the caller asked for.
+fn wanted_jobs(order: Vec<String>, wanted: &HashSet<String>) -> Vec<String> {
+    order.into_iter().filter(|n| wanted.contains(n)).collect()
 }
 
 #[derive(Debug, Clone)]
@@ -272,6 +311,7 @@ mod tests {
             .expect_err("a cycle must not produce a partial order");
         assert_eq!(err.packages, vec!["a", "b"]);
         assert_eq!(err.to_string(), "a, b");
+        assert_eq!(err.order, vec!["ghostty"], "the unaffected order survives the error");
     }
 
     #[test]
@@ -285,6 +325,50 @@ mod tests {
         ]);
         let err = g.topological_sort().expect_err("cycle must be reported");
         assert_eq!(err.packages, vec!["a", "b", "zed"]);
+        assert!(err.order.is_empty(), "nothing was orderable");
+    }
+
+    // ── plan_build_order ────────────────────────────────────────────
+
+    fn set(names: &[&str]) -> HashSet<String> {
+        names.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn a_cycle_in_the_build_set_blocks_the_run() {
+        let g = DepGraph::build(&[
+            pkg("a", &["b"]),
+            pkg("b", &["a"]),
+            pkg("ghostty", &[]),
+        ]);
+        // `b` is unresolved too, but it is not being built, so it is not named:
+        // the message is about what this run cannot do.
+        let err = g
+            .plan_build_order(&set(&["a", "ghostty"]))
+            .expect_err("an unresolved package in the build set must refuse the run");
+        assert_eq!(err.packages, vec!["a"]);
+    }
+
+    #[test]
+    fn a_cycle_outside_the_build_set_does_not_block_it() {
+        let g = DepGraph::build(&[
+            pkg("a", &["b"]),
+            pkg("b", &["a"]),
+            pkg("ghostty", &[]),
+        ]);
+        let (jobs, unresolved) = g
+            .plan_build_order(&set(&["ghostty"]))
+            .expect("ghostty does not depend on the cycle");
+        assert_eq!(jobs, vec!["ghostty"]);
+        assert_eq!(unresolved, vec!["a", "b"], "still reported, not dropped");
+    }
+
+    #[test]
+    fn a_clean_graph_plans_with_no_unresolved() {
+        let g = DepGraph::build(&hypr_stack());
+        let (jobs, unresolved) = g.plan_build_order(&set(&["hyprlock"])).expect("acyclic");
+        assert_eq!(jobs, vec!["hyprlock"], "only the wanted package is a job");
+        assert!(unresolved.is_empty());
     }
 
     // ── reverse_dep_tree ────────────────────────────────────────────
