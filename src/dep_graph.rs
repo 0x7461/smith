@@ -9,6 +9,23 @@ pub struct DepGraph {
     pub reverse: HashMap<String, HashSet<String>>,
 }
 
+/// Packages [`DepGraph::topological_sort`] could not order: the members of
+/// dependency cycles, plus everything downstream of one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnresolvedDeps {
+    /// The packages that could not be ordered, sorted.
+    pub packages: Vec<String>,
+    /// Build order of the packages that *could* be ordered, so a caller that
+    /// only wanted a subset of them does not lose the order to this error.
+    pub order: Vec<String>,
+}
+
+impl std::fmt::Display for UnresolvedDeps {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.packages.join(", "))
+    }
+}
+
 impl DepGraph {
     /// Build a dependency graph filtered to only inter-custom-package edges.
     pub fn build(packages: &[Package]) -> Self {
@@ -50,7 +67,13 @@ impl DepGraph {
     }
 
     /// Topological sort of all packages (for build order).
-    pub fn topological_sort(&self) -> Vec<String> {
+    ///
+    /// Returns `Err` naming the packages that could not be ordered — cycle
+    /// members and their dependents — rather than a partial order that drops
+    /// them. A missing package is a package that never gets built, and the
+    /// rest of the order looks fine, so the caller must not be able to ignore
+    /// it.
+    pub fn topological_sort(&self) -> Result<Vec<String>, UnresolvedDeps> {
         // in_degree[x] = number of custom deps x has
         let mut in_degree: HashMap<String, usize> = HashMap::new();
         for (name, deps) in &self.forward {
@@ -79,7 +102,49 @@ impl DepGraph {
             }
         }
 
-        result
+        if result.len() != self.forward.len() {
+            let ordered: HashSet<&str> = result.iter().map(String::as_str).collect();
+            let mut packages: Vec<String> = self
+                .forward
+                .keys()
+                .filter(|n| !ordered.contains(n.as_str()))
+                .cloned()
+                .collect();
+            packages.sort();
+            return Err(UnresolvedDeps { packages, order: result });
+        }
+
+        Ok(result)
+    }
+
+    /// Order `wanted` for building, reporting unresolved packages rather than
+    /// letting them block or vanish.
+    ///
+    /// An unresolved package inside `wanted` fails the whole call: it can never
+    /// be built, and `Err` names exactly those packages (the unresolved ones
+    /// outside `wanted` are not the caller's problem yet). An unresolved
+    /// package outside `wanted` does not block anything — the order of the rest
+    /// is still valid — so it comes back alongside the jobs for the caller to
+    /// report.
+    pub fn plan_build_order(
+        &self,
+        wanted: &HashSet<String>,
+    ) -> Result<(Vec<String>, Vec<String>), UnresolvedDeps> {
+        let unresolved = match self.topological_sort() {
+            Ok(order) => return Ok((wanted_jobs(order, wanted), Vec::new())),
+            Err(unresolved) => unresolved,
+        };
+
+        let (blocked, outside): (Vec<String>, Vec<String>) = unresolved
+            .packages
+            .into_iter()
+            .partition(|n| wanted.contains(n));
+
+        if !blocked.is_empty() {
+            return Err(UnresolvedDeps { packages: blocked, order: unresolved.order });
+        }
+
+        Ok((wanted_jobs(unresolved.order, wanted), outside))
     }
 
 /// Get tree of reverse dependencies for a package (for tree view).
@@ -107,6 +172,11 @@ impl DepGraph {
         }
         children
     }
+}
+
+/// Filter a full build order down to the packages the caller asked for.
+fn wanted_jobs(order: Vec<String>, wanted: &HashSet<String>) -> Vec<String> {
+    order.into_iter().filter(|n| wanted.contains(n)).collect()
 }
 
 #[derive(Debug, Clone)]
@@ -180,7 +250,7 @@ mod tests {
         // A self-edge would give it in_degree 1 forever and drop it silently.
         let g = DepGraph::build(&[pkg("zig", &["zig-devel", "zig"])]);
         assert!(g.forward["zig"].is_empty());
-        assert_eq!(DepGraph::build(&[pkg("zig", &["zig"])]).topological_sort(), vec!["zig"]);
+        assert_eq!(DepGraph::build(&[pkg("zig", &["zig"])]).topological_sort().unwrap(), vec!["zig"]);
     }
 
     #[test]
@@ -212,7 +282,7 @@ mod tests {
     fn dependencies_are_built_before_dependents() {
         // Relative order only: the sort iterates a HashMap, so the sequence
         // within a tier is not stable and asserting it would flake.
-        let order = DepGraph::build(&hypr_stack()).topological_sort();
+        let order = DepGraph::build(&hypr_stack()).topological_sort().unwrap();
         assert_eq!(order.len(), 4);
         assert!(pos(&order, "hyprutils") < pos(&order, "hyprlang"));
         assert!(pos(&order, "hyprutils") < pos(&order, "hyprgraphics"));
@@ -223,23 +293,82 @@ mod tests {
     #[test]
     fn unrelated_packages_all_appear() {
         let g = DepGraph::build(&[pkg("ghostty", &[]), pkg("zed", &[]), pkg("ollama", &[])]);
-        assert_eq!(g.topological_sort().len(), 3);
+        assert_eq!(g.topological_sort().unwrap().len(), 3);
     }
 
     #[test]
-    fn a_dependency_cycle_silently_drops_its_members() {
-        // KNOWN LIMITATION, pinned so a change is deliberate. Kahn's algorithm
-        // never reaches in_degree 0 inside a cycle, and this returns the partial
-        // result with no error — the cycle's packages are simply never built.
-        // Unrelated packages still come through, which is what makes it quiet.
+    fn a_dependency_cycle_is_reported_not_dropped() {
+        // Kahn's algorithm never reaches in_degree 0 inside a cycle. Returning
+        // the partial order made the cycle's packages vanish silently while
+        // unrelated ones came through, so nothing looked wrong.
         let g = DepGraph::build(&[
             pkg("a", &["b"]),
             pkg("b", &["a"]),
             pkg("ghostty", &[]),
         ]);
-        let order = g.topological_sort();
-        assert_eq!(order, vec!["ghostty"]);
-        assert!(!order.contains(&"a".to_string()));
+        let err = g
+            .topological_sort()
+            .expect_err("a cycle must not produce a partial order");
+        assert_eq!(err.packages, vec!["a", "b"]);
+        assert_eq!(err.to_string(), "a, b");
+        assert_eq!(err.order, vec!["ghostty"], "the unaffected order survives the error");
+    }
+
+    #[test]
+    fn a_cycle_also_reports_what_depends_on_it() {
+        // A dependent of a cycle never reaches in_degree 0 either, so it is
+        // just as unbuildable and must be named too.
+        let g = DepGraph::build(&[
+            pkg("a", &["b"]),
+            pkg("b", &["a"]),
+            pkg("zed", &["a"]),
+        ]);
+        let err = g.topological_sort().expect_err("cycle must be reported");
+        assert_eq!(err.packages, vec!["a", "b", "zed"]);
+        assert!(err.order.is_empty(), "nothing was orderable");
+    }
+
+    // ── plan_build_order ────────────────────────────────────────────
+
+    fn set(names: &[&str]) -> HashSet<String> {
+        names.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn a_cycle_in_the_build_set_blocks_the_run() {
+        let g = DepGraph::build(&[
+            pkg("a", &["b"]),
+            pkg("b", &["a"]),
+            pkg("ghostty", &[]),
+        ]);
+        // `b` is unresolved too, but it is not being built, so it is not named:
+        // the message is about what this run cannot do.
+        let err = g
+            .plan_build_order(&set(&["a", "ghostty"]))
+            .expect_err("an unresolved package in the build set must refuse the run");
+        assert_eq!(err.packages, vec!["a"]);
+    }
+
+    #[test]
+    fn a_cycle_outside_the_build_set_does_not_block_it() {
+        let g = DepGraph::build(&[
+            pkg("a", &["b"]),
+            pkg("b", &["a"]),
+            pkg("ghostty", &[]),
+        ]);
+        let (jobs, unresolved) = g
+            .plan_build_order(&set(&["ghostty"]))
+            .expect("ghostty does not depend on the cycle");
+        assert_eq!(jobs, vec!["ghostty"]);
+        assert_eq!(unresolved, vec!["a", "b"], "still reported, not dropped");
+    }
+
+    #[test]
+    fn a_clean_graph_plans_with_no_unresolved() {
+        let g = DepGraph::build(&hypr_stack());
+        let (jobs, unresolved) = g.plan_build_order(&set(&["hyprlock"])).expect("acyclic");
+        assert_eq!(jobs, vec!["hyprlock"], "only the wanted package is a job");
+        assert!(unresolved.is_empty());
     }
 
     // ── reverse_dep_tree ────────────────────────────────────────────

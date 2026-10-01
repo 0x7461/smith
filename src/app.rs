@@ -731,10 +731,25 @@ impl App {
             return;
         }
 
-        let topo = self.dep_graph.topological_sort();
-        let ordered: Vec<String> = topo.into_iter().filter(|n| buildable.contains(n)).collect();
+        // A cycle inside the build set blocks the run; one outside it does not,
+        // but gets said out loud rather than dropped.
+        let (ordered, unresolved) = match self.dep_graph.plan_build_order(&buildable) {
+            Ok(plan) => plan,
+            Err(blocked) => {
+                self.status_msg = Some(format!("Dependency cycle — cannot build: {}", blocked));
+                return;
+            }
+        };
 
-        self.status_msg = Some(format!("Building {} packages...", ordered.len()));
+        self.status_msg = Some(if unresolved.is_empty() {
+            format!("Building {} packages...", ordered.len())
+        } else {
+            format!(
+                "Building {} packages... unresolved cycle outside build set: {}",
+                ordered.len(),
+                unresolved.join(", ")
+            )
+        });
 
         self.build_queue.jobs = ordered
             .into_iter()
