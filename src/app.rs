@@ -126,6 +126,18 @@ impl App {
         // Prune old build logs at startup
         build::prune_build_logs(5);
 
+        // Cached upstream versions fill Latest at startup whatever their age (the daily
+        // caretaker-bump run keeps them fresh); the header's `last:` says how old the oldest
+        // is, and the TTL only decides when a check re-fetches.
+        let tracked: Vec<String> = states.iter().map(|s| s.package.name.clone()).collect();
+        version_check::prune_cache(&tracked);
+        for (name, ver, _age) in version_check::cached_versions(&tracked) {
+            if let Some(state) = states.iter_mut().find(|s| s.package.name == name) {
+                state.latest = Some(ver);
+            }
+        }
+        let pkg_last_checked = version_check::last_check_time(&tracked);
+
         Ok(App {
             packages: states,
             selected: 0,
@@ -152,7 +164,7 @@ impl App {
             shlib_map,
             shlib_updates: Vec::new(),
             build_log_scroll: 0,
-            pkg_last_checked: version_check::last_check_time(),
+            pkg_last_checked,
             template_bump_rx: None,
             template_bumping: false,
             bump_cancel_flag: Arc::new(AtomicBool::new(false)),

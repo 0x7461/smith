@@ -35,6 +35,7 @@ struct UpdateRow {
 fn discover_and_load(cfg: &config::Config) -> Result<Vec<Package>> {
     let names = repo::discover_custom_packages(&cfg.void_packages)
         .context("discovering custom packages")?;
+    version_check::prune_cache(&names);
     Ok(repo::load_packages(&cfg.void_packages, &names))
 }
 

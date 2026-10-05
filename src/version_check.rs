@@ -179,11 +179,39 @@ fn parse_update_check(name: &str, stdout: &str) -> Option<String> {
     None
 }
 
-/// Returns the oldest timestamp across all cache entries (seconds since epoch).
-/// Represents the least-recently-checked package — the true staleness floor.
-pub fn last_check_time() -> Option<u64> {
+/// The oldest check among the tracked packages (seconds since epoch): the staleness floor.
+/// Only tracked names count, so entries for retired packages can't pin it to their date.
+pub fn last_check_time(tracked: &[String]) -> Option<u64> {
+    oldest_check(&load_cache(), tracked)
+}
+
+fn oldest_check(cache: &VersionCache, tracked: &[String]) -> Option<u64> {
+    tracked.iter().filter_map(|n| cache.entries.get(n)).map(|e| e.timestamp).min()
+}
+
+/// Every cached upstream version for the tracked packages, with its age in seconds,
+/// whatever the TTL: shown at startup, marked by age. The TTL only decides re-fetching.
+pub fn cached_versions(tracked: &[String]) -> Vec<(String, String, u64)> {
     let cache = load_cache();
-    cache.entries.values().map(|e| e.timestamp).min()
+    let now = now_secs();
+    tracked
+        .iter()
+        .filter_map(|n| cache.entries.get(n).map(|e| (n.clone(), e.version.clone(), now.saturating_sub(e.timestamp))))
+        .collect()
+}
+
+/// Drop cache entries for packages no longer tracked.
+pub fn prune_cache(tracked: &[String]) {
+    let mut cache = load_cache();
+    if prune(&mut cache, tracked) {
+        save_cache(&cache);
+    }
+}
+
+fn prune(cache: &mut VersionCache, tracked: &[String]) -> bool {
+    let before = cache.entries.len();
+    cache.entries.retain(|name, _| tracked.contains(name));
+    cache.entries.len() != before
 }
 
 pub enum VersionMsg {
@@ -268,5 +296,34 @@ mod tests {
     fn returns_none_when_no_update() {
         assert_eq!(parse_update_check("foo", ""), None);
         assert_eq!(parse_update_check("foo", "some unrelated line\n"), None);
+    }
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+
+    fn cache(entries: &[(&str, u64)]) -> VersionCache {
+        VersionCache {
+            entries: entries
+                .iter()
+                .map(|(n, t)| (n.to_string(), CacheEntry { version: "1".into(), timestamp: *t }))
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn oldest_check_ignores_untracked_entries() {
+        let c = cache(&[("zed", 200), ("hyprland", 100)]);
+        assert_eq!(oldest_check(&c, &["zed".into()]), Some(200));
+        assert_eq!(oldest_check(&c, &["nothing".into()]), None);
+    }
+
+    #[test]
+    fn prune_keeps_only_tracked_packages() {
+        let mut c = cache(&[("zed", 1), ("vxpm", 1)]);
+        assert!(prune(&mut c, &["zed".into()]));
+        assert_eq!(c.entries.keys().collect::<Vec<_>>(), vec!["zed"]);
+        assert!(!prune(&mut c, &["zed".into()]));
     }
 }

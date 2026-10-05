@@ -6,7 +6,11 @@ use std::process::Command;
 
 use crate::package::{self, Package, PackageState};
 
-/// Discover custom packages by diffing master..custom branches.
+/// Discover the packages this machine builds itself: every template the `custom` branch
+/// changes (`master..custom`), plus every installed package whose template is
+/// `restricted=yes`. Void's builders never publish those, so an installed one was built
+/// here and still needs tracking after a rebase drops our commits for it (google-chrome,
+/// 2026-10-02: upstream overtook our bumps, the diff emptied, and it left the list).
 pub fn discover_custom_packages(void_pkgs: &Path) -> Result<Vec<String>> {
     let output = Command::new("git")
         .args(["log", "--name-only", "--pretty=format:", "master..custom", "--", "srcpkgs/"])
@@ -26,6 +30,8 @@ pub fn discover_custom_packages(void_pkgs: &Path) -> Result<Vec<String>> {
         }
     }
 
+    names.extend(restricted_installed(void_pkgs));
+
     // Filter out symlink dirs (subpackages like hyprland-devel)
     let srcpkgs = void_pkgs.join("srcpkgs");
     let mut result: Vec<String> = names
@@ -39,6 +45,37 @@ pub fn discover_custom_packages(void_pkgs: &Path) -> Result<Vec<String>> {
 
     result.sort();
     Ok(result)
+}
+
+/// Installed packages whose template in `void_pkgs` says `restricted=yes`.
+fn restricted_installed(void_pkgs: &Path) -> Vec<String> {
+    let Ok(output) = Command::new("xbps-query").arg("-l").output() else {
+        return Vec::new();
+    };
+    let srcpkgs = void_pkgs.join("srcpkgs");
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(installed_pkgname)
+        .filter(|name| {
+            fs::read_to_string(srcpkgs.join(name).join("template"))
+                .is_ok_and(|t| is_restricted(&t))
+        })
+        .collect()
+}
+
+/// Package name from an `xbps-query -l` line: `ii google-chrome-153.0.8010.47_1  Desc...`.
+fn installed_pkgname(line: &str) -> Option<String> {
+    let pkgver = line.split_whitespace().nth(1)?;
+    let (name, _version) = pkgver.rsplit_once('-')?;
+    Some(name.to_string())
+}
+
+/// A template's `restricted=yes` line (quoted or not), ignoring comments.
+fn is_restricted(template: &str) -> bool {
+    template.lines().any(|l| {
+        let l = l.trim();
+        !l.starts_with('#') && matches!(l, "restricted=yes" | "restricted=\"yes\"" | "restricted='yes'")
+    })
 }
 
 /// Discover packages in srcpkgs/ that aren't committed to the custom branch yet.
@@ -291,4 +328,25 @@ pub fn build_package_states(void_pkgs: &Path, packages: Vec<Package>, uncommitte
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod restricted_tests {
+    use super::*;
+
+    #[test]
+    fn pkgname_comes_from_the_second_column() {
+        assert_eq!(installed_pkgname("ii google-chrome-153.0.8010.47_1 Attempt at a browser"),
+                   Some("google-chrome".into()));
+        assert_eq!(installed_pkgname("ii zig-0.14.0_1"), Some("zig".into()));
+        assert_eq!(installed_pkgname(""), None);
+    }
+
+    #[test]
+    fn restricted_needs_the_assignment_not_a_comment() {
+        assert!(is_restricted("pkgname=x\nrestricted=yes\n"));
+        assert!(is_restricted("restricted=\"yes\""));
+        assert!(!is_restricted("# restricted=yes\npkgname=x"));
+        assert!(!is_restricted("nopie=yes"));
+    }
 }

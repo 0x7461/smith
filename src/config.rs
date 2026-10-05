@@ -65,7 +65,7 @@ fn bootstrap(path: &PathBuf, home: &str) {
     }
 
     let default = format!(
-        r#"# VPM configuration
+        r#"# smith configuration
 void_packages = "{}/void-packages"
 "#,
         home

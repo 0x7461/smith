@@ -182,8 +182,7 @@ fn draw_modal(f: &mut Frame, text: &str, border_color: Color) {
 
 fn draw_header(f: &mut Frame, app: &App, area: Rect, visible_len: usize) {
     let mut spans = vec![
-        Span::styled(" VPM ", Style::default().fg(BASE).bg(TEAL).add_modifier(Modifier::BOLD)),
-        Span::styled(" Void Package Manager", Style::default().fg(TEXT)),
+        Span::styled(" smith ", Style::default().fg(BASE).bg(TEAL).add_modifier(Modifier::BOLD)),
     ];
 
     if let Some(ref gs) = app.git_status {
