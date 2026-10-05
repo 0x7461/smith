@@ -1,6 +1,6 @@
 # AGENTS.md — smith
 
-Updated: 2026-09-24
+Updated: 2026-10-05
 
 Rust/ratatui TUI for managing the ~17 custom packages in `~/void-packages` (hyprlock stack — hyprlock/hyprgraphics/hyprlang/hyprutils/hyprwayland-scanner/libspng — plus standalone tools like ghostty, zed, ollama, zen-browser, zig). Tracks versions, checks upstream, computes dependency-aware build order, rebuilds dependents, and drives the git workflow — replaces manual checking when bumping `hyprutils` requires rebuilding its dependents. (The Hyprland compositor ecosystem itself was retired 2026-05-23; its 17 dead templates were deleted 2026-07-05.) Published as `0x7461/smith` on GitHub; xbps-src template at `~/void-packages/srcpkgs/smith/template`.
 
@@ -83,6 +83,7 @@ Badges: `↑` = upstream update available; `!so` = SONAME mismatch. (The `GCC N+
 - **Use `default-features = false, features = ["rustls-tls"]` for `reqwest`.** Default features pull `openssl-sys`; rustls-tls works on Void without system openssl-dev.
 - **Stream large downloads, hash in 64KB chunks.** `.bytes()` buffers in memory and times out on tarballs like ollama (~1.9 GB). See `version_check.rs`.
 - **Cache downloads to `hostdir/sources/<filename>`.** `download_and_checksum` streams to disk while hashing; if the file is already present, skip the network. Avoids double-download (smith + xbps-src).
+- **Discovery = `master..custom` plus installed `restricted=yes` packages** (`repo::discover_custom_packages`, 2026-10-05). Void never publishes restricted binaries, so an installed one was built here and must stay tracked even after a rebase empties its diff (google-chrome left the list on 2026-10-02 that way).
 - **Use `git log --name-only --pretty=format: master..custom -- srcpkgs/`** for package discovery, NOT `git diff`. `diff` shows 141 diverged upstream files; `log` shows only the ~26 touched by custom commits.
 - **Strip `.arch.xbps` with `rfind('.')`,** not first dot — versions contain dots.
 - **Filter subpackages by checking the character after `name-` is a digit** when scanning built .xbps.

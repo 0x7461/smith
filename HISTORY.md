@@ -5,6 +5,7 @@ Split from `PLAN.md` 2026-09-02 (see `agent-docs/PLAN.md` → the `HISTORY.md` t
 
 ---
 
+- **2026-10-05** — **Title bar and tracking fixes.** Discovery also includes installed packages whose template is `restricted=yes` (google-chrome had left the list after the 10-02 rebase dropped our obsolete bumps; Void never publishes restricted binaries). The header reads ` smith ` (was ` VPM  Void Package Manager`), and so does a new config's header comment. Cached upstream versions fill Latest at startup whatever their age; the 1 h TTL now only decides re-fetching, so the daily caretaker-bump check is visible instead of every launch showing all packages "unchecked". `last:` is the oldest check among *tracked* packages, and cache entries for untracked ones are pruned (33 → 16: `vxpm` and the retired Hyprland stack had pinned `last:` to 2026-07-05). Verified in a pty: `pkgs: 1 unchecked (last: 2026-10-02 00:07)`; the one is ghostty, which has no cache entry.
 - **2026-10-01** — **Renamed vxpm → smith, v0.8.0** (#89 town-roles theme: builds the packages). Crate, binary, help text, user agent, release asset (`smith-linux-x86_64.tar.gz`), auto-bump marker (`# smith-auto-bump: true`). `~/.config/vxpm` and `~/.cache/vxpm` migrate to `smith/` on first run (extends the old `vpm/` migration; tested in a throwaway HOME).
 - **2026-10-01 — `topological_sort` reports cycles instead of dropping them.**
   It returned the partial Kahn order, so a cycle's packages never appeared in the build order while
