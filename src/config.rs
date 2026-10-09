@@ -73,3 +73,20 @@ void_packages = "{}/void-packages"
 
     let _ = std::fs::write(path, default);
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn parses_document_into_table() {
+        // toml 1.x changed `FromStr for Value` to parse a value, not a document;
+        // `Table` must still parse a whole document, which `load()` relies on.
+        let table: toml::Table =
+            "# smith configuration\nvoid_packages = \"/home/u/void-packages\"\n"
+                .parse()
+                .unwrap();
+        assert_eq!(
+            table.get("void_packages").and_then(|v| v.as_str()),
+            Some("/home/u/void-packages")
+        );
+    }
+}
