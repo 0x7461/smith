@@ -1,6 +1,6 @@
 # AGENTS.md — smith
 
-Updated: 2026-10-05
+Updated: 2026-10-09
 
 Rust/ratatui TUI for managing the ~17 custom packages in `~/void-packages` (hyprlock stack — hyprlock/hyprgraphics/hyprlang/hyprutils/hyprwayland-scanner/libspng — plus standalone tools like ghostty, zed, ollama, zen-browser, zig). Tracks versions, checks upstream, computes dependency-aware build order, rebuilds dependents, and drives the git workflow — replaces manual checking when bumping `hyprutils` requires rebuilding its dependents. (The Hyprland compositor ecosystem itself was retired 2026-05-23; its 17 dead templates were deleted 2026-07-05.) Published as `0x7461/smith` on GitHub; xbps-src template at `~/void-packages/srcpkgs/smith/template`.
 
@@ -99,7 +99,7 @@ Badges: `↑` = upstream update available; `!so` = SONAME mismatch. (The `GCC N+
 **Ask first:**
 - Anything touching `~/void-packages/` outside the configured discovery scope.
 - Adding install integration (`xi` keybind). Skipped intentionally; needs sudo.
-- Re-tagging a published release. Procedure exists (`gh release delete`, `git tag -d`, push deletion, re-tag, push, recreate) but is destructive — use only for pre-user-impact fixes, otherwise bump version.
+- Re-tagging a published release. Procedure exists (delete the GitHub release via the web UI or API, `git tag -d`, push deletion, re-tag, push, recreate) but is destructive — use only for pre-user-impact fixes, otherwise bump version.
 
 **Untested / known-fragile:**
 - GitHub Actions–only releases (artifact uploads instead of releases-API binaries) — version checking doesn't detect these. Declined as backlog (no custom package hits this).
@@ -155,9 +155,9 @@ Full step-by-step in [`PLAN.md ## Operations / Publishing`](./PLAN.md#operations
 
 ### Re-tagging a release
 
-For pre-user-impact fixes only (use a version bump otherwise):
+For pre-user-impact fixes only (use a version bump otherwise). `gh` is not installed — delete the
+GitHub release from the web UI (Releases → vX → Delete), then:
 ```bash
-gh release delete v<x.y.z>
 git tag -d v<x.y.z>
 git push origin :refs/tags/v<x.y.z>
 git tag v<x.y.z>            # at latest commit
