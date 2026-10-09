@@ -35,7 +35,7 @@ cargo clippy --all-targets
 # `cargo build` to refresh Cargo.lock. Then: git tag v<x.y.z>, push tag → GH Actions builds.
 ```
 
-Config bootstrap: `~/.config/smith/config.toml` is auto-created on first run.
+Config bootstrap: `~/.config/smith/config.toml` is auto-created on first run. Its only key is `void_packages` (default `~/void-packages`; `~` is expanded — `src/config.rs`). On startup `config::migrate_legacy_paths()` (called from `src/main.rs`) renames the legacy state dirs `vpm/` → `vxpm/` → `smith/` under `~/.config` and `~/.cache`, so a rebuild must keep it.
 
 ## Project layout
 
@@ -58,6 +58,7 @@ src/
 External integration points:
 - `~/void-packages/` — discovery, build, git ops all target this repo (configurable in `config.toml`).
 - `~/.config/smith/config.toml` — user config.
+- `~/.cache/smith/versions.json` — 1h upstream-version cache (`CACHE_TTL_SECS` in `src/version_check.rs`); `U` and `bump --all` read it, `u` and `check-updates` bypass it.
 - `~/.cache/smith/build_history.json` — persisted build history.
 - `~/.cache/smith/logs/<pkg>-<ts>.log` and `<pkg>-bump-<ts>.log` — build/bump logs.
 - `~/void-packages/hostdir/sources/<filename>` — download cache (avoids double-download with xbps-src).

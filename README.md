@@ -45,7 +45,7 @@ For cron/runit automation:
 smith check-updates           # list "<name> <cur> -> <latest>" lines
 smith check-updates --json    # same, as JSON
 smith bump <pkg>              # bump one template + checksum (no build)
-smith bump --all              # bump every UpstreamAhead pkg
+smith bump --all              # bump every pkg whose upstream version is newer than the template
 ```
 
 Exit codes (grep convention): `0` = no updates / success, `1` = updates available / partial failure, `2` = GitHub rate-limited.
