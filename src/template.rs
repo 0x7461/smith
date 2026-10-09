@@ -174,6 +174,17 @@ fn resolve_distfiles_url(raw: &str, vars: &HashMap<String, String>, new_version:
     ResolvedDistfile { url, cache_filename }
 }
 
+/// Lowercase-hex-encode a digest. `digest` 0.11's `Output` array dropped its `LowerHex` impl
+/// (generic-array -> hybrid-array), so the bytes are formatted directly.
+fn to_hex(bytes: &[u8]) -> String {
+    use std::fmt::Write;
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        let _ = write!(s, "{:02x}", b);
+    }
+    s
+}
+
 /// Download a URL, stream to sources_dir for xbps-src caching, and return its SHA256 hex digest.
 /// `cache_filename` is the name used under `sources_dir/` and must match xbps-src's filename
 /// (which is the `>rename` part of a distfiles entry when present, not the URL tail).
@@ -209,7 +220,7 @@ fn download_and_checksum(url: &str, cache_filename: &str, sources_dir: &Path, ca
             if n == 0 { break; }
             hasher.update(&buf[..n]);
         }
-        return Ok(format!("{:x}", hasher.finalize()));
+        return Ok(to_hex(&hasher.finalize()));
     }
 
     let mut response = client.get(url).send()?.error_for_status()?;
@@ -238,7 +249,7 @@ fn download_and_checksum(url: &str, cache_filename: &str, sources_dir: &Path, ca
         .with_context(|| format!("moving to source cache: {}", final_path.display()))?;
 
     let hash = hasher.finalize();
-    Ok(format!("{:x}", hash))
+    Ok(to_hex(&hash))
 }
 
 /// Rewrite template content: update version, reset revision to 1, update checksum.
@@ -302,6 +313,17 @@ mod tests {
         let r = resolve_distfiles_url(raw, &vars(&[("_channel", "stable")]), "148.0.7778.167");
         assert_eq!(r.url, "https://dl.google.com/foo/google-chrome-stable_148.0.7778.167-1_amd64.deb");
         assert_eq!(r.cache_filename, "google-chrome-stable_148.0.7778.167-1_amd64.deb");
+    }
+
+    #[test]
+    fn to_hex_matches_lowercase_sha256() {
+        // sha256("abc") — pins the encoding to the format the old `{:x}` produced
+        let mut hasher = Sha256::new();
+        hasher.update(b"abc");
+        assert_eq!(
+            to_hex(&hasher.finalize()),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
     }
 
     #[test]
