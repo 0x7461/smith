@@ -119,7 +119,7 @@ Active operations (build / bump / git) all share the same Esc→confirm modal pa
 
 ### Recovering an auto-bump that failed to fetch
 
-`smith-bumper` reports `xbps-fetch: failed to fetch <url> (null)` when the download fails — the
+`caretaker-bump` reports `xbps-fetch: failed to fetch <url> (null)` when the download fails — the
 `(null)` is xbps-fetch having no error string, not a URL problem, so **the URL in the message is
 usually fine**. Seen on zed 1.15.0 (2026-08-15). It can be environment-local: the same fetch failed
 from an agent shell over plain HTTP while the user's own environment was fine, so **a failure to
