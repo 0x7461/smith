@@ -25,51 +25,201 @@ pub fn bump_template(void_pkgs: &Path, name: &str, new_version: &str, log_path: 
     let content = fs::read_to_string(&template_path)
         .with_context(|| format!("reading template: {}", template_path.display()))?;
 
-    // Parse variables from template to resolve distfiles URL
+    // Parse variables from template to resolve distfiles URLs
     let vars = parse_template_vars(&content);
     let old_version = vars.get("version").cloned().unwrap_or_default();
     writeln!(log, "   Current version: {}", old_version)?;
 
-    // Get the raw distfiles line (with ${version} unexpanded)
-    let raw_distfiles = vars.get("distfiles").cloned().unwrap_or_default();
-
-    // Resolve the download URL with the new version
-    let resolved = resolve_distfiles_url(&raw_distfiles, &vars, new_version);
-    writeln!(log, "=> Resolved distfiles URL:")?;
-    writeln!(log, "   {}", resolved.url)?;
-    writeln!(log, "   cache filename: {}", resolved.cache_filename)?;
-
-    if resolved.url.is_empty() {
-        writeln!(log, "=> FAILED: could not resolve distfiles URL")?;
-        bail!("Could not resolve distfiles URL for {}", name);
+    // One checksum line per arch branch (google-chrome). Update every one, so a
+    // multi-arch template is not left with the other arch on the old hash.
+    let targets = checksum_targets(&content);
+    if targets.is_empty() {
+        writeln!(log, "=> FAILED: no checksum/distfiles in template")?;
+        bail!("no checksum/distfiles found in {} template", name);
     }
 
-    // Download tarball and compute SHA256 (also caches to hostdir/sources/ for xbps-src)
     let sources_dir = void_pkgs.join("hostdir").join("sources");
-    writeln!(log, "=> Downloading and computing SHA256...")?;
-    let _ = log.flush();
-    match download_and_checksum(&resolved.url, &resolved.cache_filename, &sources_dir, &cancel, true) {
-        Ok(new_checksum) => {
-            writeln!(log, "   checksum={}", new_checksum)?;
-
-            // Rewrite template file line by line
-            writeln!(log, "=> Rewriting template: version={}, revision=1", new_version)?;
-            let new_content = rewrite_template(&content, new_version, &new_checksum);
-            fs::write(&template_path, &new_content)
-                .with_context(|| format!("writing template: {}", template_path.display()))?;
-
-            writeln!(log, "=> Done. {} {} → {}", name, old_version, new_version)?;
-
-            Ok(BumpResult {
-                old_version,
-                new_version: new_version.to_string(),
-            })
+    let mut new_checksums: HashMap<usize, String> = HashMap::new();
+    for (line_idx, raw_distfiles) in &targets {
+        if raw_distfiles.is_empty() {
+            writeln!(log, "=> FAILED: checksum at line {} has no distfiles", line_idx + 1)?;
+            bail!("checksum at line {} of {} has no distfiles in scope", line_idx + 1, name);
         }
-        Err(e) => {
-            writeln!(log, "=> FAILED: {:?}", e)?;
-            Err(e.context(format!("downloading {}", resolved.url)))
+        let resolved = resolve_distfiles_url(raw_distfiles, &vars, new_version);
+        if resolved.url.is_empty() {
+            writeln!(log, "=> FAILED: could not resolve distfiles URL at line {}", line_idx + 1)?;
+            bail!("Could not resolve distfiles URL for {} (line {})", name, line_idx + 1);
+        }
+        writeln!(log, "=> Downloading and computing SHA256:")?;
+        writeln!(log, "   {}", resolved.url)?;
+        let _ = log.flush();
+        match download_and_checksum(&resolved.url, &resolved.cache_filename, &sources_dir, &cancel, true) {
+            Ok(cs) => {
+                writeln!(log, "   checksum={}", cs)?;
+                new_checksums.insert(*line_idx, cs);
+            }
+            Err(e) => {
+                writeln!(log, "=> FAILED: {:?}", e)?;
+                return Err(e.context(format!("downloading {}", resolved.url)));
+            }
         }
     }
+
+    writeln!(log, "=> Rewriting template: version={}, revision=1", new_version)?;
+    let new_content = rewrite_template(&content, new_version, &new_checksums);
+    fs::write(&template_path, &new_content)
+        .with_context(|| format!("writing template: {}", template_path.display()))?;
+
+    writeln!(log, "=> Done. {} {} → {}", name, old_version, new_version)?;
+
+    Ok(BumpResult {
+        old_version,
+        new_version: new_version.to_string(),
+    })
+}
+
+/// The xbps-src target machine for this host: `XBPS_TARGET_MACHINE` when set,
+/// else mapped from the build arch.
+fn host_arch() -> String {
+    if let Ok(a) = std::env::var("XBPS_TARGET_MACHINE") {
+        if !a.is_empty() {
+            return a;
+        }
+    }
+    match std::env::consts::ARCH {
+        "x86_64" => "x86_64",
+        "aarch64" => "aarch64",
+        "x86" => "i686",
+        "arm" => "armv7l",
+        "powerpc64" => "ppc64le",
+        other => other,
+    }
+    .to_string()
+}
+
+/// Tracks `case … esac` blocks so assignments are read from the branch that
+/// matches this host. Without it the last branch won: google-chrome's `aarch64`
+/// distfile and checksum overwrote the `x86_64` ones.
+///
+/// Handles the form void templates use: one pattern per line, `case <subject> in`,
+/// `;;` between branches, `esac`. An inline `pattern) command ;;` is not
+/// recognised.
+pub(crate) struct CaseState {
+    in_case: bool,
+    matched: bool,
+    active: bool,
+}
+
+impl CaseState {
+    pub(crate) fn new() -> Self {
+        Self { in_case: false, matched: false, active: false }
+    }
+
+    /// Consume a line as case-control syntax. Returns true when it was one, so
+    /// the caller skips it as an assignment.
+    pub(crate) fn observe(&mut self, trimmed: &str) -> bool {
+        if !self.in_case {
+            if trimmed.starts_with("case ") && trimmed.ends_with(" in") {
+                self.in_case = true;
+                self.matched = false;
+                self.active = false;
+                return true;
+            }
+            return false;
+        }
+        if trimmed == "esac" {
+            self.in_case = false;
+            self.matched = false;
+            self.active = false;
+            return true;
+        }
+        if trimmed == ";;" {
+            self.active = false;
+            return true;
+        }
+        if let Some(pat) = branch_pattern(trimmed) {
+            self.active = !self.matched && pattern_matches(pat);
+            self.matched |= self.active;
+            return true;
+        }
+        false
+    }
+
+    /// Whether an assignment on the current line applies to this host.
+    pub(crate) fn allow(&self) -> bool {
+        !self.in_case || self.active
+    }
+}
+
+fn branch_pattern(line: &str) -> Option<&str> {
+    let inner = line.strip_suffix(')')?.trim();
+    if inner.is_empty()
+        || inner.contains('(')
+        || inner.contains('=')
+        || inner.chars().any(|c| c.is_whitespace())
+    {
+        return None;
+    }
+    Some(inner)
+}
+
+fn pattern_matches(pattern: &str) -> bool {
+    let arch = host_arch();
+    pattern
+        .split('|')
+        .map(str::trim)
+        .any(|p| p == arch || p == "*" || p == "all")
+}
+
+/// For each `checksum=` assignment: its 0-based line index and the raw
+/// `distfiles` value in scope (top-level, or the enclosing case branch). The
+/// bump uses this to download and update every arch's checksum, not just the
+/// host branch's.
+fn checksum_targets(content: &str) -> Vec<(usize, String)> {
+    let mut out = Vec::new();
+    let mut case_state = CaseState::new();
+    let mut in_function = false;
+    let mut distfiles = String::new();
+    for (idx, line) in content.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.ends_with("() {") {
+            in_function = true;
+            continue;
+        }
+        if trimmed == "}" {
+            in_function = false;
+            continue;
+        }
+        if in_function {
+            continue;
+        }
+        if case_state.observe(trimmed) {
+            continue;
+        }
+        if let Some(eq) = trimmed.find('=') {
+            let lhs = trimmed[..eq].trim();
+            let (name, append) = match lhs.strip_suffix('+') {
+                Some(n) => (n.trim(), true),
+                None => (lhs, false),
+            };
+            if !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                let val = trimmed[eq + 1..].trim().trim_matches('"').to_string();
+                if name == "distfiles" {
+                    if append {
+                        if !distfiles.is_empty() {
+                            distfiles.push(' ');
+                        }
+                        distfiles.push_str(&val);
+                    } else {
+                        distfiles = val;
+                    }
+                } else if name == "checksum" {
+                    out.push((idx, distfiles.clone()));
+                }
+            }
+        }
+    }
+    out
 }
 
 /// Parse shell-style variable assignments from a template, keeping values unexpanded.
@@ -77,6 +227,7 @@ fn parse_template_vars(content: &str) -> HashMap<String, String> {
     let mut vars = HashMap::new();
     let mut in_multiline: Option<String> = None;
     let mut multiline_buf = String::new();
+    let mut case_state = CaseState::new();
 
     for line in content.lines() {
         if let Some(ref varname) = in_multiline {
@@ -97,6 +248,12 @@ fn parse_template_vars(content: &str) -> HashMap<String, String> {
 
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if case_state.observe(trimmed) {
+            continue;
+        }
+        if !case_state.allow() {
             continue;
         }
 
@@ -252,22 +409,25 @@ fn download_and_checksum(url: &str, cache_filename: &str, sources_dir: &Path, ca
     Ok(to_hex(&hash))
 }
 
-/// Rewrite template content: update version, reset revision to 1, update checksum.
-fn rewrite_template(content: &str, new_version: &str, new_checksum: &str) -> String {
+/// Rewrite template content: update version, reset revision to 1, and replace
+/// each checksum line with the digest computed for its own distfiles (keyed by
+/// 0-based line index). Checksum lines absent from the map are left untouched.
+fn rewrite_template(content: &str, new_version: &str, new_checksums: &HashMap<usize, String>) -> String {
     let mut lines: Vec<String> = Vec::new();
 
-    for line in content.lines() {
+    for (idx, line) in content.lines().enumerate() {
         let trimmed = line.trim();
+        let indent = &line[..line.len() - trimmed.len()];
 
         if trimmed.starts_with("version=") {
-            // Preserve indentation
-            let indent = &line[..line.len() - trimmed.len()];
             lines.push(format!("{}version={}", indent, new_version));
         } else if trimmed.starts_with("revision=") {
-            let indent = &line[..line.len() - trimmed.len()];
             lines.push(format!("{}revision=1", indent));
-        } else if trimmed.starts_with("checksum=") {
-            let indent = &line[..line.len() - trimmed.len()];
+        } else if let Some(new_checksum) = trimmed
+            .starts_with("checksum=")
+            .then(|| new_checksums.get(&idx))
+            .flatten()
+        {
             lines.push(format!("{}checksum={}", indent, new_checksum));
         } else {
             lines.push(line.to_string());
@@ -331,5 +491,34 @@ mod tests {
         let raw = "https://example.com/dl?file=foo-${version}.tar.gz";
         let r = resolve_distfiles_url(raw, &vars(&[]), "1.0");
         assert_eq!(r.cache_filename, "dl");
+    }
+
+    #[test]
+    fn case_block_reads_host_branch() {
+        let content = "\
+pkgname=chrome\nversion=155\ncase \"$XBPS_TARGET_MACHINE\" in\nx86_64)\n\tdistfiles=\"https://x/amd64-${version}.deb\"\n\tchecksum=aaa\n\t;;\naarch64)\n\tdistfiles=\"https://x/arm64-${version}.deb\"\n\tchecksum=bbb\n\t;;\n*)\n\tbroken=\"no distfiles\"\n\t;;\nesac\n";
+        let v = parse_template_vars(content);
+        assert!(v["distfiles"].contains("amd64"), "got {}", v["distfiles"]);
+        assert!(!v.contains_key("broken"), "fallback branch leaked in");
+        // Every branch's checksum is captured (so all arches can be updated).
+        let targets = checksum_targets(content);
+        assert_eq!(targets.len(), 2);
+        assert!(targets[0].1.contains("amd64"));
+        assert!(targets[1].1.contains("arm64"));
+    }
+
+    #[test]
+    fn rewrite_updates_each_checksum_by_line() {
+        let content = "\
+version=1\nrevision=3\ncase \"$X\" in\nx86_64)\n\tchecksum=old1\n\t;;\naarch64)\n\tchecksum=old2\n\t;;\nesac\n";
+        let mut m = HashMap::new();
+        m.insert(4usize, "new1".to_string());
+        m.insert(7usize, "new2".to_string());
+        let out = rewrite_template(content, "2", &m);
+        assert!(out.contains("version=2"));
+        assert!(out.contains("revision=1"));
+        assert!(out.contains("checksum=new1"));
+        assert!(out.contains("checksum=new2"));
+        assert!(!out.contains("old1") && !out.contains("old2"));
     }
 }

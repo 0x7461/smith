@@ -5,6 +5,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::shlibs::{ShlibEntry, SonameMismatch};
+use crate::template::CaseState;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Package {
@@ -206,6 +207,8 @@ pub fn parse_template(path: &Path) -> Result<Package> {
     // main package: a `short_desc+=` in `foo-terminfo_package()` must not be
     // appended to the package-wide short_desc (ghostty).
     let mut in_function = false;
+    // Case blocks are arch-conditional; only the matching branch is read.
+    let mut case_state = CaseState::new();
 
     for line in content.lines() {
         // If we're accumulating a multiline value
@@ -238,6 +241,14 @@ pub fn parse_template(path: &Path) -> Result<Package> {
             continue;
         }
         if in_function {
+            continue;
+        }
+
+        // Read assignments only from the case branch matching this host.
+        if case_state.observe(trimmed) {
+            continue;
+        }
+        if !case_state.allow() {
             continue;
         }
 
