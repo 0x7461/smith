@@ -5,6 +5,17 @@ Split from `PLAN.md` 2026-09-02 (see `agent-docs/PLAN.md` → the `HISTORY.md` t
 
 ---
 
+- **2026-10-10** — **Opus review-findings batch (~20 fixes).** Parser reads `case` blocks for the
+  host arch and updates every arch branch's checksum; `version_newer` compares void revisions (a
+  `_2`/`_1` tie could make `clean` delete the newest build); nonfree binpkgs dirs are scanned; a
+  cancelled build is no longer recorded as a failure; a successful build clears `BuildFailed` and a
+  version check no longer wipes it; Ctrl+C no longer falls through to `clean_old_packages`; the
+  pre-flight modal can't panic below 44 columns; the status bar reserves room for its counts; the
+  help panel shows all keybinds; `bump --all` exits 2 when rate-limited; function-scope assignments
+  are skipped (ghostty's subpackage `short_desc+=`); tags-only upstreams and the shlib orphan case
+  parse correctly; a malformed `config.toml` warns instead of failing silent. Committed on branch
+  `fix/review-findings-2026-10` (not yet merged to `master`).
+
 - **2026-10-05** — **Title bar and tracking fixes.** Discovery also includes installed packages whose template is `restricted=yes` (google-chrome had left the list after the 10-02 rebase dropped our obsolete bumps; Void never publishes restricted binaries). The header reads ` smith ` (was ` VPM  Void Package Manager`), and so does a new config's header comment. Cached upstream versions fill Latest at startup whatever their age; the 1 h TTL now only decides re-fetching, so the daily caretaker-bump check is visible instead of every launch showing all packages "unchecked". `last:` is the oldest check among *tracked* packages, and cache entries for untracked ones are pruned (33 → 16: `vxpm` and the retired Hyprland stack had pinned `last:` to 2026-07-05). Verified in a pty: `pkgs: 1 unchecked (last: 2026-10-02 00:07)`; the one is ghostty, which has no cache entry.
 - **2026-10-01** — **Renamed vxpm → smith, v0.8.0** (#89 town-roles theme: builds the packages). Crate, binary, help text, user agent, release asset (`smith-linux-x86_64.tar.gz`), auto-bump marker (`# smith-auto-bump: true`). `~/.config/vxpm` and `~/.cache/vxpm` migrate to `smith/` on first run (extends the old `vpm/` migration; tested in a throwaway HOME).
 - **2026-10-01 — `topological_sort` reports cycles instead of dropping them.**
