@@ -58,7 +58,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         PanelMode::BuildLog => 12,
         PanelMode::BumpLog => 12,
         PanelMode::GitMenu => 10,
-        PanelMode::Help => 16,
+        PanelMode::Help => 22,
     };
 
     let chunks = if panel_height > 0 {
@@ -142,7 +142,10 @@ fn draw_preflight_modal(f: &mut Frame, warnings: &[crate::build::PreflightWarnin
     lines.push(Line::from(Span::styled(hint, Style::default().fg(OVERLAY0))));
 
     let width = (area.width as f32 * 0.7) as u16;
-    let width = width.clamp(40, area.width.saturating_sub(4));
+    // Clamp low bound to the available width first: `clamp(40, w-4)` panicked
+    // when the terminal was narrower than 44 columns.
+    let max_w = area.width.saturating_sub(4).max(1);
+    let width = width.min(max_w).max(40.min(max_w));
     let inner = width.saturating_sub(2).max(1) as usize;
     // Account for word-wrapping when estimating height.
     let rows: usize = lines
@@ -617,6 +620,7 @@ fn draw_build_log(f: &mut Frame, app: &App, area: Rect) {
             BuildJobStatus::Success => ("[OK]", GREEN),
             BuildJobStatus::Building => ("[BUILD]", TEAL),
             BuildJobStatus::Failed => ("[FAIL]", RED),
+            BuildJobStatus::Cancelled => ("[CANCEL]", OVERLAY0),
             BuildJobStatus::Pending => ("[WAIT]", OVERLAY0),
         };
         queue_spans.push(Span::styled(
@@ -670,7 +674,10 @@ fn draw_bump_log(f: &mut Frame, app: &App, area: Rect) {
     };
 
     let available = area.height.saturating_sub(2) as usize; // borders
-    let tail = output.len().saturating_sub(app.bump_log_scroll);
+    // Clamp the scroll offset: scrolling past the top rendered an empty panel.
+    let max_scroll = output.len().saturating_sub(available);
+    let scroll = app.bump_log_scroll.min(max_scroll);
+    let tail = output.len().saturating_sub(scroll);
     let start = tail.saturating_sub(available);
     for line_text in &output[start..tail] {
         let color = if line_text.starts_with("=> FAILED") { RED } else { TEXT };
@@ -882,12 +889,24 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
 
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(0), Constraint::Length(KEYBINDS.len() as u16)])
+        // Reserve the keybind strip only when the counts/status message still get
+        // a usable width; otherwise it consumed everything and the left side
+        // rendered at zero columns. Help lists the keys in full under `?`.
+        .constraints([
+            Constraint::Min(0),
+            Constraint::Length(if area.width >= KEYBINDS.len() as u16 + 40 {
+                KEYBINDS.len() as u16
+            } else {
+                0
+            }),
+        ])
         .split(area);
 
     let left = Paragraph::new(Line::from(spans));
     f.render_widget(left, chunks[0]);
 
-    let right = Paragraph::new(Span::styled(KEYBINDS, Style::default().fg(OVERLAY0)));
-    f.render_widget(right, chunks[1]);
+    if chunks[1].width > 0 {
+        let right = Paragraph::new(Span::styled(KEYBINDS, Style::default().fg(OVERLAY0)));
+        f.render_widget(right, chunks[1]);
+    }
 }

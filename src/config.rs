@@ -36,14 +36,33 @@ pub fn load() -> Config {
 
     let void_packages = match std::fs::read_to_string(&config_path) {
         Ok(content) => {
-            let table: toml::Table = content.parse().unwrap_or_default();
+            let table: toml::Table = match content.parse() {
+                Ok(t) => t,
+                Err(e) => {
+                    // Fall back, but say so: a silent default sent the wrong path
+                    // to every subcommand when the file was malformed.
+                    eprintln!(
+                        "Warning: {} is not valid TOML ({}); using ~/void-packages",
+                        config_path.display(),
+                        e
+                    );
+                    toml::Table::new()
+                }
+            };
             table
                 .get("void_packages")
                 .and_then(|v| v.as_str())
                 .map(|s| expand_tilde(s, &home))
                 .unwrap_or_else(|| PathBuf::from(&home).join("void-packages"))
         }
-        Err(_) => PathBuf::from(&home).join("void-packages"),
+        Err(e) => {
+            eprintln!(
+                "Warning: cannot read {} ({}); using ~/void-packages",
+                config_path.display(),
+                e
+            );
+            PathBuf::from(&home).join("void-packages")
+        }
     };
 
     Config { void_packages }

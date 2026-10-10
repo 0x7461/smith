@@ -176,6 +176,16 @@ fn bump(args: &[String]) -> Result<i32> {
             }
         }
     }
-    Ok(if failed == 0 { 0 } else { 1 })
+    // README exit-code contract: 2 = GitHub rate-limited. Only `--all` can skip
+    // packages on a rate-limited sweep; a single-package bump either resolved
+    // its target or already reported an error, so it stays 0/1 (caretaker's
+    // daily driver relies on that).
+    Ok(if failed > 0 {
+        1
+    } else if all && rate_limited {
+        2
+    } else {
+        0
+    })
 }
 

@@ -94,6 +94,20 @@ fn run_tui(cfg: config::Config) -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
+    let result = run_tui_loop(&mut terminal, cfg);
+
+    // Restore unconditionally, even when the loop returned early (e.g. App::new
+    // on a missing void-packages dir) — otherwise the shell is left raw.
+    let _ = disable_raw_mode();
+    let _ = execute!(terminal.backend_mut(), LeaveAlternateScreen);
+
+    result
+}
+
+fn run_tui_loop(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    cfg: config::Config,
+) -> Result<()> {
     let mut app = app::App::new(cfg.void_packages)?;
 
     loop {
@@ -111,11 +125,10 @@ fn run_tui(cfg: config::Config) -> Result<()> {
                 if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c')
                 {
                     app.request_quit();
-                    if !app.should_quit {
-                        // quit_confirm was set — keep running until user answers
-                    } else {
-                        break;
-                    }
+                    // Never fall through: with a filter active, KeyCode::Char('c')
+                    // would reach the main match and run clean_old_packages()
+                    // mid-build. `should_quit` is checked at the loop tail.
+                    continue;
                 }
 
                 if app.filter_active {
@@ -221,7 +234,5 @@ fn run_tui(cfg: config::Config) -> Result<()> {
         }
     }
 
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     Ok(())
 }

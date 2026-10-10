@@ -131,6 +131,12 @@ pub fn check_soname_mismatches(
     } else {
         built
     };
+    // Neither built nor installed means the package is absent, not that every
+    // registered soname is orphaned — with nothing to compare against, the old
+    // code reported every entry as Orphaned/needs-manual-removal.
+    if installed.is_empty() {
+        return Vec::new();
+    }
     let mut mismatches = Vec::new();
 
     for entry in shlibs {

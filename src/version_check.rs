@@ -26,6 +26,12 @@ struct GitHubRelease {
     tag_name: String,
 }
 
+/// The tags endpoint returns `{ name, commit }`, not a release's `tag_name`.
+#[derive(Deserialize)]
+struct GitHubTag {
+    name: String,
+}
+
 fn cache_path() -> PathBuf {
     let dir = dirs_cache().join("smith");
     fs::create_dir_all(&dir).ok();
@@ -133,9 +139,9 @@ fn check_github(owner: &str, repo: &str) -> Result<Option<String>> {
             .send()?;
 
         if resp.status().is_success() {
-            let tags: Vec<GitHubRelease> = resp.json()?;
+            let tags: Vec<GitHubTag> = resp.json()?;
             if let Some(tag) = tags.first() {
-                return Ok(Some(clean_version_tag(&tag.tag_name)));
+                return Ok(Some(clean_version_tag(&tag.name)));
             }
         }
         return Ok(None);

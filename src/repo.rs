@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use std::collections::HashSet;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::package::{self, Package, PackageState};
@@ -100,8 +100,9 @@ pub fn discover_uncommitted_packages(void_pkgs: &Path, committed: &HashSet<Strin
         }
         let status = &line[..2];
         let path = line[3..].trim();
-        // Only care about untracked (??) and staged-new (A )
-        if status != "??" && status != "A " {
+        // Untracked (??) or added to the index (A ), including modified-after-add
+        // (AM) — a new template edited after `git add` is still new.
+        if status != "??" && !status.starts_with('A') {
             continue;
         }
         // Path looks like "srcpkgs/foo/" or "srcpkgs/foo/template"
@@ -162,11 +163,21 @@ pub fn query_installed(name: &str) -> Option<String> {
 
 /// Scan hostdir/binpkgs for built .xbps files for a given package.
 /// Returns the version_revision from the filename if found.
-pub fn find_built_xbps(void_pkgs: &Path, name: &str) -> Option<String> {
-    let dirs = [
+/// Every hostdir/binpkgs subdirectory smith scans for built .xbps files.
+/// The `nonfree` trees hold restricted packages (google-chrome); scanning only
+/// the two top dirs meant their builds never showed as built and were never
+/// trimmed.
+fn binpkgs_dirs(void_pkgs: &Path) -> [PathBuf; 4] {
+    [
         void_pkgs.join("hostdir/binpkgs"),
+        void_pkgs.join("hostdir/binpkgs/nonfree"),
         void_pkgs.join("hostdir/binpkgs/custom"),
-    ];
+        void_pkgs.join("hostdir/binpkgs/custom/nonfree"),
+    ]
+}
+
+pub fn find_built_xbps(void_pkgs: &Path, name: &str) -> Option<String> {
+    let dirs = binpkgs_dirs(void_pkgs);
 
     let prefix = format!("{}-", name);
     let mut best: Option<String> = None;
@@ -211,10 +222,7 @@ pub fn find_built_xbps(void_pkgs: &Path, name: &str) -> Option<String> {
 /// Collect all .xbps files for a given package across binpkgs dirs.
 /// Returns Vec<(path, version_revision)> sorted oldest-first.
 fn collect_xbps_files(void_pkgs: &Path, name: &str) -> Vec<(std::path::PathBuf, String)> {
-    let dirs = [
-        void_pkgs.join("hostdir/binpkgs"),
-        void_pkgs.join("hostdir/binpkgs/custom"),
-    ];
+    let dirs = binpkgs_dirs(void_pkgs);
     let prefix = format!("{}-", name);
     let mut files: Vec<(std::path::PathBuf, String)> = Vec::new();
 

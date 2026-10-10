@@ -75,7 +75,6 @@ pub struct App {
     pub template_bump_rx: Option<Receiver<TemplateBumpMsg>>,
     pub template_bumping: bool,
     pub bump_cancel_flag: Arc<AtomicBool>,
-    pub bump_had_failure: bool,
     pub bump_log_path: Option<std::path::PathBuf>,
     pub bump_log_scroll: usize,
     pub cancel_confirm: Option<String>, // op name being cancelled ("build"/"bump"/"git")
@@ -168,7 +167,6 @@ impl App {
             template_bump_rx: None,
             template_bumping: false,
             bump_cancel_flag: Arc::new(AtomicBool::new(false)),
-            bump_had_failure: false,
             bump_log_path: None,
             bump_log_scroll: 0,
             cancel_confirm: None,
@@ -362,11 +360,15 @@ impl App {
                     for state in &mut self.packages {
                         if state.package.name == name {
                             state.latest = Some(ver.clone());
-                            state.status = PackageState::compute_status(
-                                &state.package,
-                                &state.installed,
-                                &state.built,
-                            );
+                            // A version check is not a rebuild: don't wipe a
+                            // pending BuildFailed marker.
+                            if state.status != Status::BuildFailed {
+                                state.status = PackageState::compute_status(
+                                    &state.package,
+                                    &state.installed,
+                                    &state.built,
+                                );
+                            }
                         }
                     }
                     self.status_msg = Some(match cache_age {
@@ -415,17 +417,16 @@ impl App {
                 }
                 TemplateBumpMsg::Failed(name, err) => {
                     self.status_msg = Some(format!("Bump failed for {}: {}", name, err));
-                    self.bump_had_failure = true;
                 }
                 TemplateBumpMsg::AllDone => {
                     self.template_bumping = false;
                     self.template_bump_rx = None;
-                    let preserve_msg = self.bump_had_failure;
-                    self.bump_had_failure = false;
+                    // Keep the bump outcome: refresh() would otherwise overwrite it
+                    // with "Refreshed" before the user can read it.
                     let saved = self.status_msg.clone();
                     self.refresh();
-                    if preserve_msg {
-                        self.status_msg = saved;
+                    if let Some(msg) = saved {
+                        self.status_msg = Some(msg);
                     }
                     return;
                 }
@@ -596,6 +597,14 @@ impl App {
                     for state in &mut self.packages {
                         if state.package.name == name {
                             state.build_log = Some(log_str.clone());
+                            // A successful build clears any earlier BuildFailed
+                            // marker; refresh() preserves failed statuses, so
+                            // leaving it set kept the row red until restart.
+                            state.status = PackageState::compute_status(
+                                &state.package,
+                                &state.installed,
+                                &state.built,
+                            );
                             // Re-check against the just-built .xbps (startup mismatch
                             // data reflects the previously installed package)
                             if let Some(entries) = self.shlib_map.get(&name) {
@@ -659,6 +668,22 @@ impl App {
                         ));
                     }
                     self.build_history.record(&name, false);
+                }
+                BuildMsg::Cancelled(name, log_path) => {
+                    for job in &mut self.build_queue.jobs {
+                        if job.name == name {
+                            job.status = BuildJobStatus::Cancelled;
+                        }
+                    }
+                    let log_str = log_path.to_string_lossy().to_string();
+                    for state in &mut self.packages {
+                        if state.package.name == name {
+                            state.build_log = Some(log_str.clone());
+                            // Cancelled is not a failure: leave the package's
+                            // status (and history) untouched.
+                        }
+                    }
+                    self.status_msg = Some(format!("Build of {} cancelled", name));
                 }
                 BuildMsg::QueueComplete => {
                     self.build_queue.active = false;

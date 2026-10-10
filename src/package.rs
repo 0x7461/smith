@@ -134,19 +134,36 @@ pub fn version_newer_pub(a: &str, b: &str) -> bool {
     version_newer(a, b)
 }
 
+/// Split a void `pkgver` into (version, revision). The revision is the number
+/// after the last '_' ("0.6.8_2" -> ("0.6.8", 2)); a bare version has revision 0.
+fn split_rev(v: &str) -> (&str, u64) {
+    match v.rsplit_once('_') {
+        Some((base, rev)) if !rev.is_empty() && rev.chars().all(|c| c.is_ascii_digit()) => {
+            (base, rev.parse().unwrap_or(0))
+        }
+        _ => (v, 0),
+    }
+}
+
 /// Compare two version strings. Returns true if `a` is newer than `b`.
 /// Splits on '.', compares numeric parts left to right. Parts with non-numeric
 /// suffixes (e.g. "0beta1") are treated as prereleases, older than the same
 /// number without a suffix ("0"). So "0.45.0" > "0.45.0beta1".
+/// When base versions tie, the void revision (`_2`) is compared numerically:
+/// treating it as a prerelease suffix made "0.6.8_2" and "0.6.8_1" compare
+/// equal, so clean_old_packages could delete the newer revision.
 fn version_newer(a: &str, b: &str) -> bool {
+    let (base_a, rev_a) = split_rev(a);
+    let (base_b, rev_b) = split_rev(b);
+
     // Returns (numeric_prefix, has_prerelease_suffix)
     let parse_part = |p: &str| -> (u64, bool) {
         let num_end = p.find(|c: char| !c.is_ascii_digit()).unwrap_or(p.len());
         let num: u64 = p[..num_end].parse().unwrap_or(0);
         (num, num_end < p.len())
     };
-    let parts_a: Vec<&str> = a.split('.').collect();
-    let parts_b: Vec<&str> = b.split('.').collect();
+    let parts_a: Vec<&str> = base_a.split('.').collect();
+    let parts_b: Vec<&str> = base_b.split('.').collect();
     for i in 0..parts_a.len().max(parts_b.len()) {
         let (na, pre_a) = parse_part(parts_a.get(i).copied().unwrap_or("0"));
         let (nb, pre_b) = parse_part(parts_b.get(i).copied().unwrap_or("0"));
@@ -163,7 +180,7 @@ fn version_newer(a: &str, b: &str) -> bool {
             _ => {}
         }
     }
-    false
+    rev_a > rev_b
 }
 
 /// Extract "version_revision" from xbps-query pkgver like "hyprutils-0.11.0_1"
@@ -185,6 +202,10 @@ pub fn parse_template(path: &Path) -> Result<Package> {
     let mut vars: HashMap<String, String> = HashMap::new();
     let mut in_multiline: Option<String> = None;
     let mut multiline_buf = String::new();
+    // Assignments inside a function body apply to that function's build, not the
+    // main package: a `short_desc+=` in `foo-terminfo_package()` must not be
+    // appended to the package-wide short_desc (ghostty).
+    let mut in_function = false;
 
     for line in content.lines() {
         // If we're accumulating a multiline value
@@ -207,6 +228,19 @@ pub fn parse_template(path: &Path) -> Result<Package> {
 
         let trimmed = line.trim();
 
+        // Track function scope: `name() {` opens, a lone `}` closes.
+        if trimmed.ends_with("() {") {
+            in_function = true;
+            continue;
+        }
+        if trimmed == "}" {
+            in_function = false;
+            continue;
+        }
+        if in_function {
+            continue;
+        }
+
         // Skip comments, empty lines, functions, conditionals
         if trimmed.is_empty()
             || trimmed.starts_with('#')
@@ -214,8 +248,6 @@ pub fn parse_template(path: &Path) -> Result<Package> {
             || trimmed.starts_with("fi")
             || trimmed.starts_with("then")
             || trimmed.starts_with("else")
-            || trimmed.ends_with("() {")
-            || trimmed == "}"
             || trimmed.starts_with("vmove")
             || trimmed.starts_with("vlicense")
             || trimmed.starts_with("vinstall")
@@ -361,6 +393,11 @@ mod tests {
         assert!(!version_newer("0.45.0beta1", "0.45.0beta1"));
         // Cross-digit boundary (was broken with lexicographic comparison)
         assert!(version_newer("10.0.0", "9.0.0"));
+        // Void revision suffix: a higher revision of the same version is newer
+        assert!(version_newer("0.6.8_2", "0.6.8_1"));
+        assert!(!version_newer("0.6.8_1", "0.6.8_2"));
+        assert!(!version_newer("0.6.8_1", "0.6.8_1"));
+        assert!(version_newer("0.6.10_1", "0.6.8_9"));
     }
 
     #[test]

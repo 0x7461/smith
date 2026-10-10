@@ -14,6 +14,7 @@ pub enum BuildJobStatus {
     Building,
     Success,
     Failed,
+    Cancelled,
 }
 
 #[derive(Debug, Clone)]
@@ -27,6 +28,7 @@ pub enum BuildMsg {
     Output(String, String),                    // (name, line)
     Finished(String, PathBuf),                 // (name, log_path)
     Failed(String, Vec<String>, PathBuf),      // (name, last N error lines, log_path)
+    Cancelled(String, PathBuf),                // (name, log_path) — our own kill, not a failure
     QueueComplete,
 }
 
@@ -477,6 +479,11 @@ fn run_build_queue(void_pkgs: PathBuf, names: Vec<String>, tx: Sender<BuildMsg>,
                 match wait_result {
                     Some(Ok(status)) if status.success() => {
                         let _ = tx.send(BuildMsg::Finished(name.clone(), log_path));
+                    }
+                    // A cancelled build is our own kill, not a failure: don't
+                    // mark the package BUILD FAILED or write a history failure.
+                    _ if cancel.load(Ordering::SeqCst) => {
+                        let _ = tx.send(BuildMsg::Cancelled(name.clone(), log_path));
                     }
                     Some(Ok(_)) | None => {
                         if log_path != PathBuf::new() {
