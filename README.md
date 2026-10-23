@@ -46,6 +46,8 @@ smith check-updates           # list "<name> <cur> -> <latest>" lines
 smith check-updates --json    # same, as JSON
 smith bump <pkg>              # bump one template + checksum (no build)
 smith bump --all              # bump every pkg whose upstream version is newer than the template
+smith prune-repo              # list official-named .xbps shadowing the official repo (dry run)
+smith prune-repo --apply      # remove them and reindex the local repo
 ```
 
 Exit codes (grep convention): `0` = no updates / success, `1` = updates available / partial failure, `2` = GitHub rate-limited.

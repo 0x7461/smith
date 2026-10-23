@@ -314,6 +314,187 @@ pub fn clean_all_packages(void_pkgs: &Path, managed_names: &[String]) -> (usize,
     (deleted, freed)
 }
 
+/// Every binary package name a template produces: `pkgname`, each `subpackages`
+/// entry, and one `<name>_package()` function per synthesised subpackage. Mirrors
+/// caretaker's `voidpkgs.template_binary_names` — keep the two in step, or one of them
+/// will disagree about which names are ours.
+fn template_binary_names(text: &str) -> HashSet<String> {
+    let mut names: HashSet<String> = HashSet::new();
+    // A `subpackages="` whose closing quote is on a later line.
+    let mut pending: Option<String> = None;
+
+    for raw in text.lines() {
+        let line = raw.trim();
+
+        if let Some(buf) = pending.as_mut() {
+            buf.push(' ');
+            buf.push_str(line);
+            if line.contains('"') {
+                for token in buf.split_whitespace() {
+                    add_subpackage(&mut names, token);
+                }
+                pending = None;
+            }
+            continue;
+        }
+
+        if let Some(rest) = line.strip_prefix("pkgname=") {
+            if let Some(v) = rest.split_whitespace().next() {
+                names.insert(v.trim_matches('"').to_string());
+            }
+            continue;
+        }
+
+        if let Some(rest) = line.strip_prefix("subpackages=") {
+            let value = rest.trim_start();
+            match value.strip_prefix('"') {
+                Some(after) if after.contains('"') => {
+                    let inner = after.split('"').next().unwrap_or("");
+                    for token in inner.split_whitespace() {
+                        add_subpackage(&mut names, token);
+                    }
+                }
+                Some(after) => pending = Some(after.to_string()),
+                None => {
+                    for token in value.split_whitespace() {
+                        add_subpackage(&mut names, token);
+                    }
+                }
+            }
+            continue;
+        }
+
+        // `ghostty-terminfo_package() {` synthesises that subpackage.
+        if let Some(idx) = line.find("_package()") {
+            let name = &line[..idx];
+            if !name.is_empty()
+                && name
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "._+-".contains(c))
+            {
+                names.insert(name.to_string());
+            }
+        }
+    }
+
+    if let Some(buf) = pending {
+        for token in buf.split_whitespace() {
+            add_subpackage(&mut names, token);
+        }
+    }
+    names
+}
+
+fn add_subpackage(names: &mut HashSet<String>, token: &str) {
+    let name = token.split(':').next().unwrap_or("").trim_matches('"');
+    if !name.is_empty() {
+        names.insert(name.to_string());
+    }
+}
+
+/// `mesa-intel-dri-26.2.4_1.x86_64.xbps` -> `mesa-intel-dri`.
+fn xbps_pkgname(fname: &str) -> Option<String> {
+    let stem = fname.strip_suffix(".xbps")?;
+    let no_arch = stem.rsplit_once('.')?.0;
+    let (name, ver_rev) = no_arch.rsplit_once('-')?;
+    if !name.is_empty() && ver_rev.starts_with(|c: char| c.is_ascii_digit()) {
+        Some(name.to_string())
+    } else {
+        None
+    }
+}
+
+/// Every binary package name the official repositories offer, read from the on-disk
+/// repodata (no network, ~0.3 s).
+fn official_package_names() -> HashSet<String> {
+    let Ok(out) = Command::new("xbps-query").args(["-R", "-s", ""]).output() else {
+        return HashSet::new();
+    };
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| l.split_whitespace().nth(1))
+        .filter_map(|pkgver| pkgver.rsplit_once('-').map(|(n, _)| n.to_string()))
+        .collect()
+}
+
+/// Binaries the local `custom` repo must not hold: names the official repositories
+/// also publish, that no custom template produces. Returns (path, pkgname, bytes).
+///
+/// `xi` puts the local repos first, so such a copy wins over the official one even
+/// when it is older, and xbps-src then rebuilds that package (and its whole
+/// dependency chain) from source — zed's 2026-10-09 vulkan-loader failure. They
+/// arrive as dependencies built for one build (mesa's chain, 2026-10-22) and are
+/// obsolete by the next one: officially 26.2.5 was installed while 26.2.4 sat in
+/// the repo.
+///
+/// Two conditions, both required, because a wrong deletion is expensive: the name
+/// must be official (otherwise it shadows nothing) and must not come from a custom
+/// template. Either index coming back empty returns nothing — that means the lookup
+/// failed, and "delete everything" is not an acceptable reading of "delete the drift".
+pub fn foreign_packages(void_pkgs: &Path) -> Result<Vec<(PathBuf, String, u64)>> {
+    let repo_dir = void_pkgs.join("hostdir/binpkgs/custom");
+    if !repo_dir.is_dir() {
+        return Ok(Vec::new());
+    }
+
+    let mut managed: HashSet<String> = HashSet::new();
+    for src in discover_custom_packages(void_pkgs)? {
+        if let Ok(text) = fs::read_to_string(void_pkgs.join("srcpkgs").join(&src).join("template")) {
+            managed.extend(template_binary_names(&text));
+        }
+    }
+    if managed.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let official = official_package_names();
+    if official.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut found = Vec::new();
+    for entry in fs::read_dir(&repo_dir)? {
+        let path = entry?.path();
+        let Some(fname) = path.file_name().and_then(|f| f.to_str()) else {
+            continue;
+        };
+        let Some(pkgname) = xbps_pkgname(fname) else {
+            continue;
+        };
+        if !official.contains(&pkgname) || managed.contains(&pkgname) {
+            continue;
+        }
+        let size = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        found.push((path, pkgname, size));
+    }
+    found.sort_by(|a, b| a.1.cmp(&b.1));
+    Ok(found)
+}
+
+/// Delete every binary `foreign_packages` names, then drop the removed entries from
+/// the repository index — without that last step xbps keeps advertising them and
+/// fails to fetch them on the next install.
+/// Returns (files_removed, bytes_freed).
+pub fn prune_foreign_packages(void_pkgs: &Path) -> Result<(usize, u64)> {
+    let found = foreign_packages(void_pkgs)?;
+    let mut removed = 0usize;
+    let mut freed = 0u64;
+    for (path, _, size) in &found {
+        if fs::remove_file(path).is_ok() {
+            let _ = fs::remove_file(path.with_extension("xbps.sig"));
+            freed += size;
+            removed += 1;
+        }
+    }
+    if removed > 0 {
+        let _ = Command::new("xbps-rindex")
+            .arg("-c")
+            .arg(void_pkgs.join("hostdir/binpkgs/custom"))
+            .output();
+    }
+    Ok((removed, freed))
+}
+
 /// Build full PackageState for all packages.
 pub fn build_package_states(void_pkgs: &Path, packages: Vec<Package>, uncommitted: &HashSet<String>) -> Vec<PackageState> {
     packages
@@ -356,5 +537,48 @@ mod restricted_tests {
         assert!(is_restricted("restricted=\"yes\""));
         assert!(!is_restricted("# restricted=yes\npkgname=x"));
         assert!(!is_restricted("nopie=yes"));
+    }
+}
+
+#[cfg(test)]
+mod prune_tests {
+    use super::*;
+
+    #[test]
+    fn binary_names_cover_pkgname_and_subpackages() {
+        let t = "pkgname=mesa\nversion=1\nsubpackages=\"mesa-dri mesa-vaapi:desc\"\n";
+        let names = template_binary_names(t);
+        assert!(names.contains("mesa"));
+        assert!(names.contains("mesa-dri"));
+        // The `:desc` suffix is not part of the name.
+        assert!(names.contains("mesa-vaapi"));
+    }
+
+    #[test]
+    fn binary_names_include_synthesised_subpackages() {
+        let t = "pkgname=ghostty\nversion=1\n\nghostty-terminfo_package() {\n\tshort_desc+=\" x\"\n}\n";
+        let names = template_binary_names(t);
+        assert!(names.contains("ghostty"));
+        assert!(names.contains("ghostty-terminfo"));
+    }
+
+    #[test]
+    fn binary_names_follow_a_multiline_subpackages_list() {
+        let t = "pkgname=x\nsubpackages=\"x-a\n  x-b\"\nversion=1\n";
+        let names = template_binary_names(t);
+        assert!(names.contains("x-a"));
+        assert!(names.contains("x-b"));
+    }
+
+    #[test]
+    fn pkgname_is_stripped_of_version_and_arch() {
+        assert_eq!(
+            xbps_pkgname("mesa-intel-dri-26.2.4_1.x86_64.xbps"),
+            Some("mesa-intel-dri".into())
+        );
+        assert_eq!(xbps_pkgname("zed-1.25.3_1.x86_64.xbps"), Some("zed".into()));
+        // A repodata index is not a package.
+        assert_eq!(xbps_pkgname("x86_64-repodata"), None);
+        assert_eq!(xbps_pkgname("foo.x86_64.xbps"), None);
     }
 }

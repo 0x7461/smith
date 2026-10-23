@@ -685,7 +685,7 @@ impl App {
                     }
                     self.status_msg = Some(format!("Build of {} cancelled", name));
                 }
-                BuildMsg::QueueComplete => {
+                BuildMsg::QueueComplete(pruned, freed) => {
                     self.build_queue.active = false;
                     self.build_queue.receiver = None;
 
@@ -701,11 +701,19 @@ impl App {
                         .map(|j| j.name.clone())
                         .collect();
 
+                    let pruned_note = if pruned > 0 {
+                        format!("; pruned {pruned} foreign .xbps ({} MB)", freed / 1_048_576)
+                    } else {
+                        String::new()
+                    };
+
                     if !succeeded.is_empty() {
                         self.status_msg =
-                            Some(format!("Run: xi {}", succeeded.join(" ")));
+                            Some(format!("Run: xi {}{}", succeeded.join(" "), pruned_note));
                     } else {
-                        self.status_msg = Some("Build queue finished (no successful builds)".to_string());
+                        self.status_msg = Some(format!(
+                            "Build queue finished (no successful builds){pruned_note}"
+                        ));
                     }
                 }
             }

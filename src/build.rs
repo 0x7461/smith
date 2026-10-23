@@ -8,6 +8,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
+use crate::repo;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum BuildJobStatus {
     Pending,
@@ -29,7 +31,9 @@ pub enum BuildMsg {
     Finished(String, PathBuf),                 // (name, log_path)
     Failed(String, Vec<String>, PathBuf),      // (name, last N error lines, log_path)
     Cancelled(String, PathBuf),                // (name, log_path) — our own kill, not a failure
-    QueueComplete,
+    /// (files pruned from the custom repo, bytes freed) — runs once per queue, not per
+    /// package: pruning between packages of one queue would delete deps the next job needs.
+    QueueComplete(usize, u64),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -513,7 +517,23 @@ fn run_build_queue(void_pkgs: PathBuf, names: Vec<String>, tx: Sender<BuildMsg>,
         }
     }
 
-    let _ = tx.send(BuildMsg::QueueComplete);
+    // One prune per queue, after the last build: dependencies built from source for
+    // this queue are needed until the queue ends, and the repo must not keep them
+    // afterwards (they would shadow the official copies on the next `xi`).
+    let (pruned, freed) = if cancel.load(Ordering::SeqCst) {
+        (0, 0)
+    } else {
+        repo::prune_foreign_packages(&void_pkgs).unwrap_or_else(|e| {
+            let _ = tx.send(BuildMsg::Failed(
+                "prune".to_string(),
+                vec![format!("pruning the custom repo failed: {e}")],
+                PathBuf::new(),
+            ));
+            (0, 0)
+        })
+    };
+
+    let _ = tx.send(BuildMsg::QueueComplete(pruned, freed));
 }
 
 #[cfg(test)]

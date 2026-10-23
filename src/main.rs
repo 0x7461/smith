@@ -44,7 +44,7 @@ fn main() -> Result<()> {
     if let Some(sub) = args.get(1).map(String::as_str) {
         match sub {
             "dump" => return dump(&config::load()),
-            "check-updates" | "bump" => {
+            "check-updates" | "bump" | "prune-repo" => {
                 let code = cli::run(&args[1..])?;
                 std::process::exit(code);
             }
@@ -64,6 +64,7 @@ fn print_help() {
     println!("    smith check-updates [--json]   List packages with upstream updates");
     println!("    smith bump <pkg>               Bump template + checksum for one package");
     println!("    smith bump --all               Bump every package with an upstream update");
+    println!("    smith prune-repo [--apply]     List/remove official-named .xbps from the custom repo");
     println!("    smith --version|-V             Print version and exit");
     println!("    smith --help|-h                Print this help and exit");
     println!();

@@ -5,6 +5,14 @@ Split from `PLAN.md` 2026-09-02 (see `agent-docs/PLAN.md` → the `HISTORY.md` t
 
 ---
 
+- **2026-10-23** — **Prune the custom repo after each build queue.** 42 official-named packages
+  (mesa's whole dependency chain) sat in `hostdir/binpkgs/custom` dated 2026-10-22, older than what
+  was installed, shadowing the official repo for `xi` and forcing source rebuilds. The queue now
+  prunes once at the end (`repo::prune_foreign_packages`), gated on both "official also publishes
+  it" and "no custom template produces it"; `smith prune-repo [--apply]` covers hand-run builds.
+  `template_binary_names` parses `pkgname`, `subpackages` (incl. multi-line) and `<name>_package()`
+  functions, mirroring caretaker's `voidpkgs`.
+
 - **2026-10-10** — **Opus review-findings batch (~20 fixes).** Parser reads `case` blocks for the
   host arch and updates every arch branch's checksum; `version_newer` compares void revisions (a
   `_2`/`_1` tie could make `clean` delete the newest build); nonfree binpkgs dirs are scanned; a

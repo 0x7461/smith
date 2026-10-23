@@ -20,6 +20,7 @@ pub fn run(args: &[String]) -> Result<i32> {
     match args.first().map(String::as_str) {
         Some("check-updates") => check_updates(&args[1..]),
         Some("bump") => bump(&args[1..]),
+        Some("prune-repo") => prune_repo(&args[1..]),
         Some(other) => bail!("unknown subcommand: {}", other),
         None => unreachable!("dispatch guards against this"),
     }
@@ -187,5 +188,46 @@ fn bump(args: &[String]) -> Result<i32> {
     } else {
         0
     })
+}
+
+/// List (default) or delete the binaries in `hostdir/binpkgs/custom` that the
+/// official repos also publish and no custom template produces.
+///
+/// The build queue prunes itself when it finishes; this exists for the builds run
+/// by hand as `xbps-src pkg <name>`, which no queue is watching. Dry run by
+/// default — `--apply` is the only thing that deletes.
+fn prune_repo(args: &[String]) -> Result<i32> {
+    let mut apply = false;
+    for arg in args {
+        match arg.as_str() {
+            "--apply" => apply = true,
+            "--dry-run" => apply = false,
+            other => bail!("unknown flag: {}", other),
+        }
+    }
+
+    let cfg = config::load();
+    let found = repo::foreign_packages(&cfg.void_packages)?;
+    if found.is_empty() {
+        println!("no foreign binaries in the custom repo");
+        return Ok(0);
+    }
+
+    for (_, name, size) in &found {
+        println!("{:<32} {:>7} KiB", name, size / 1024);
+    }
+
+    if !apply {
+        println!(
+            "{} foreign binaries, {} MiB — re-run with --apply to remove them",
+            found.len(),
+            found.iter().map(|(_, _, s)| s).sum::<u64>() / 1_048_576
+        );
+        return Ok(0);
+    }
+
+    let (removed, freed) = repo::prune_foreign_packages(&cfg.void_packages)?;
+    println!("removed {} binaries, {} MiB freed", removed, freed / 1_048_576);
+    Ok(0)
 }
 

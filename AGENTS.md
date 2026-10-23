@@ -25,6 +25,8 @@ cargo build --release
 ./target/release/smith check-updates --json
 ./target/release/smith bump <pkg>         # bump one template + checksum (no build)
 ./target/release/smith bump --all         # bump every pkg with an upstream update
+./target/release/smith prune-repo         # list official-named .xbps in the custom repo (dry run)
+./target/release/smith prune-repo --apply # delete them + reindex; the build queue does this itself
 
 # Tests / lints
 cargo test
@@ -89,6 +91,7 @@ Badges: `↑` = upstream update available; `!so` = SONAME mismatch. (The `GCC N+
 - **Strip `.arch.xbps` with `rfind('.')`,** not first dot — versions contain dots.
 - **Filter subpackages by checking the character after `name-` is a digit** when scanning built .xbps.
 - **Set `pkg_last_checked = SystemTime::now()` directly in `poll_version_check` Done handler,** not from cache. Within TTL (<1h), no disk timestamps update → header appears frozen if read from disk.
+- **Prune the custom repo after a build queue, not between builds** (`repo::prune_foreign_packages`, 2026-10-23). `xi` searches `hostdir/binpkgs/custom` before the mirrors, so an official-named binary left there wins over the official copy even when older, and xbps-src rebuilds that package and its dependency chain from source (zed's vulkan-loader, 2026-10-09). Dependencies built from source land there and are obsolete by the next build (mesa 26.2.4 in the repo while 26.2.5 was installed). Pruning mid-queue would delete a dep the next job still needs. Two conditions must both hold before deleting — the name is in the official index *and* no custom template produces it — and an empty index aborts instead of emptying the repo.
 - **`git rebase --abort` on cancel or failure during `RebaseCustom`.** `run_git_op` takes `cancel: Arc<AtomicBool>` + `current_child` mutex; rebase cleanup is mandatory.
 
 **Never do:**
@@ -98,7 +101,7 @@ Badges: `↑` = upstream update available; `!so` = SONAME mismatch. (The `GCC N+
 - **Don't call `refresh()` after setting a status message.** `refresh()` clobbers prior messages with `"Refreshed"`. Order: `refresh()` first, then set the real message. For bump failures: save the message and restore after AllDone.
 
 **Ask first:**
-- Anything touching `~/void-packages/` outside the configured discovery scope.
+- Anything touching `~/void-packages/` outside the configured discovery scope (exception: `prune-repo`, which only removes the repo's own built binaries).
 - Adding install integration (`xi` keybind). Skipped intentionally; needs sudo.
 - Re-tagging a published release. Procedure exists (delete the GitHub release via the web UI or API, `git tag -d`, push deletion, re-tag, push, recreate) but is destructive — use only for pre-user-impact fixes, otherwise bump version.
 
